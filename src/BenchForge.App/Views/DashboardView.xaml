@@ -13,6 +13,14 @@
                 </DockPanel>
             </Border>
 
+            <Border Style="{StaticResource Card}" Margin="0,0,0,14" Visibility="{Binding CrashSummary, Converter={StaticResource Vis}}" Padding="14,10">
+                <TextBlock Text="{Binding CrashSummary}" TextWrapping="Wrap" FontWeight="SemiBold" />
+            </Border>
+            <StackPanel Visibility="{Binding SystemChecks.Count, Converter={StaticResource Vis}}" Margin="0,0,0,6">
+                <TextBlock Text="Things to check on this PC" Style="{StaticResource H2}" />
+                <ItemsControl ItemsSource="{Binding SystemChecks}" ItemTemplate="{StaticResource RecTemplate}" />
+            </StackPanel>
+
             <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition /></Grid.ColumnDefinitions>

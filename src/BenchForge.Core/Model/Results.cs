@@ -64,6 +64,9 @@ public sealed class Recommendation
     public string Title { get; set; } = "";
     public string Detail { get; set; } = "";
     public List<string> Actions { get; set; } = new();
+    /// <summary>One-click fixes BenchForge can apply for this problem.</summary>
+    public List<Analysis.FixId> Fixes { get; set; } = new();
+    [JsonIgnore] public IEnumerable<Analysis.FixInfo> FixInfos => Fixes.Select(Analysis.Fixes.Get);
 }
 
 public sealed class Finding

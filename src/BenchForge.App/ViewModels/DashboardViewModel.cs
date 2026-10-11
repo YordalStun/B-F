@@ -32,6 +32,32 @@ public sealed partial class DashboardViewModel : PageViewModel
     public ObservableCollection<MetricTile> Tiles { get; } = new();
     public MetricChart[] Charts { get; }
     public ObservableCollection<SensorRow> AllSensors { get; } = new();
+    public ObservableCollection<Recommendation> SystemChecks { get; } = new();
+    [ObservableProperty] private string _crashSummary = "";
+
+    /// <summary>Problems that can be spotted without running a test (settings, drive health, recent crashes).</summary>
+    public void LoadSystemChecks(HardwareInventory inv)
+    {
+        SystemChecks.Clear();
+        foreach (var r in Core.Analysis.RecommendationEngine.SystemChecks(inv)) SystemChecks.Add(r);
+        Task.Run(() =>
+        {
+            try
+            {
+                var spec = new Core.Events.EventQuerySpec { Since = DateTime.Now.AddDays(-30) };
+                spec.Selectors.AddRange(Core.Events.EventPresets.BlueScreens.Selectors);
+                spec.Selectors.AddRange(Core.Events.EventPresets.UnexpectedShutdowns.Selectors);
+                spec.Selectors.AddRange(Core.Events.EventPresets.Whea.Selectors);
+                var events = Main.S.Events.Query(spec, 500);
+                var crashes = Core.Crash.CrashAnalyzer.FindSystemCrashes(events);
+                int whea = events.Count(e => e.Provider.Contains("WHEA"));
+                var text = crashes.Count == 0 && whea == 0 ? "No crashes or hardware errors recorded by Windows in the last 30 days."
+                    : $"Windows recorded {crashes.Count} crash{(crashes.Count == 1 ? "" : "es")} and {whea} hardware (WHEA) error{(whea == 1 ? "" : "s")} in the last 30 days — see Crashes.";
+                Ui.Post(() => CrashSummary = text);
+            }
+            catch { }
+        });
+    }
 
     [ObservableProperty] private string _cpuName = "Detecting hardware…";
     [ObservableProperty] private string _gpuName = "";

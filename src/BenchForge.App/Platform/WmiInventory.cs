@@ -128,6 +128,15 @@ public static class WmiInventory
             int a = output.LastIndexOf('('), b = output.LastIndexOf(')');
             inv.PowerPlan = a >= 0 && b > a ? output[(a + 1)..b] : output.Trim();
         });
+        Try(inv, "Windows settings", () =>
+        {
+            using var cc = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CrashControl");
+            if (cc?.GetValue("CrashDumpEnabled") is int dump) inv.CrashDumpSetting = dump;
+            using var pw = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Power");
+            if (pw?.GetValue("HiberbootEnabled") is int hb) inv.FastStartupEnabled = hb != 0;
+            using var gd = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers");
+            if (gd?.GetValue("TdrDelay") is int tdr) inv.TdrDelaySeconds = tdr;
+        });
         return inv;
     }
 

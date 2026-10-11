@@ -17,6 +17,10 @@ public sealed class HardwareInventory
     public string BiosVersion { get; set; } = "";
     public DateTime? BiosDate { get; set; }
     public bool IsAdmin { get; set; }
+    /// <summary>CrashControl\CrashDumpEnabled: 0 = none, 1 = complete, 2 = kernel, 3 = small, 7 = automatic.</summary>
+    public int? CrashDumpSetting { get; set; }
+    public bool? FastStartupEnabled { get; set; }
+    public int? TdrDelaySeconds { get; set; }
     public List<string> Notes { get; set; } = new();
 }
 

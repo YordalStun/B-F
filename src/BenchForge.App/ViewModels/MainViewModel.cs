@@ -72,6 +72,7 @@ public sealed partial class MainViewModel : ObservableObject
         S.InventoryReady += () => Ui.Post(() =>
         {
             Dashboard.SetInventory(S.Inventory!);
+            Dashboard.LoadSystemChecks(S.Inventory!);
             AdminText = S.Inventory!.IsAdmin ? "Administrator" : "Not administrator — some sensors/logs unavailable";
         });
         S.Start();
@@ -142,6 +143,15 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var w = new Views.AiWindow(new AiChatViewModel(this, title, runs, crashes, events, question)) { Owner = Application.Current.MainWindow };
         w.Show();
+    }
+
+    [RelayCommand]
+    private void RunFix(Core.Analysis.FixInfo? fix)
+    {
+        if (fix == null) return;
+        var msg = $"{fix.Title}\n\n{fix.WhatItDoes}\n\n{(fix.NeedsRestart ? "A restart is needed afterwards.\n\n" : "")}To undo: {fix.HowToUndo}\n\nGo ahead?";
+        if (MessageBox.Show(msg, "BenchForge fix", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        new Views.FixWindow(fix) { Owner = Application.Current.MainWindow }.Show();
     }
 
     [RelayCommand] private void DismissBanner() => Banner = null;

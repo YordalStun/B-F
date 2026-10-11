@@ -386,3 +386,24 @@ public class PersistenceTests
         Assert.Empty(SessionJournal.FindUnfinished(dir));
     }
 }
+
+public class FixTests
+{
+    [Fact]
+    public void Stop_codes_map_to_software_fixes()
+    {
+        Assert.Contains(FixId.MemoryDiagnostic, RecommendationEngine.FixesForBugCheck(0x1A));
+        Assert.Contains(FixId.ScanDisk, RecommendationEngine.FixesForBugCheck(0x7A));
+        Assert.Contains(FixId.DisableFastStartup, RecommendationEngine.FixesForBugCheck(0x9F));
+        Assert.Empty(RecommendationEngine.FixesForBugCheck(0x124)); // hardware: guidance only
+    }
+
+    [Fact]
+    public void System_checks_offer_crash_dump_and_power_fixes()
+    {
+        var checks = RecommendationEngine.SystemChecks(new HardwareInventory { CrashDumpSetting = 0, PowerPlan = "Power saver" });
+        Assert.Contains(checks, r => r.Fixes.Contains(FixId.EnableCrashDumps));
+        Assert.Contains(checks, r => r.Fixes.Contains(FixId.PowerPlanBalanced));
+        Assert.DoesNotContain(checks, r => r.Title == "No problems found");
+    }
+}

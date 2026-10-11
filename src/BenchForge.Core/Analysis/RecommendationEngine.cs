@@ -14,6 +14,11 @@ public static class RecommendationEngine
             if (list.Any(x => x.Title == title)) return;
             list.Add(new Recommendation { Severity = s, Component = c, Title = title, Detail = detail, Actions = actions.ToList() });
         }
+        void Fix(string title, params FixId[] fixes)
+        {
+            var rec = list.FirstOrDefault(x => x.Title == title);
+            if (rec != null) foreach (var f in fixes) if (!rec.Fixes.Contains(f)) rec.Fixes.Add(f);
+        }
 
         var f = r.Findings;
         bool Has(Func<Finding, bool> p) => f.Any(p);
@@ -32,6 +37,7 @@ public static class RecommendationEngine
                 "Test one stick at a time in the slot the manual recommends to find a faulty stick",
                 "Reseat the RAM and clean the slots",
                 "Run Windows Memory Diagnostic or MemTest86 overnight for confirmation");
+        Fix("Fix RAM errors", FixId.MemoryDiagnostic);
         if (Has(x => x.Component == Component.Gpu && (x.Title.Contains("crashed") || x.Title.Contains("Video memory"))))
             Add(Severity.Critical, Component.Gpu, "Stabilise the graphics card", "The GPU crashed, stopped responding or returned wrong data.",
                 "Remove any GPU overclock / undervolt (MSI Afterburner, Adrenalin tuning) and memory overclock",
@@ -39,6 +45,7 @@ public static class RecommendationEngine
                 "Use two separate PCIe power cables from the PSU (no daisy-chained pigtail)",
                 "Check GPU temperatures and clean the cooler; check VRAM temperature",
                 "If it still fails at stock settings, test the card in another PC or contact the manufacturer (RMA)");
+        Fix("Stabilise the graphics card", FixId.IncreaseTdrDelay);
         if (Has(x => x.Component == Component.Storage && x.Severity == Severity.Critical))
             Add(Severity.Critical, Component.Storage, "Protect your data — drive problem", "The drive returned corrupted data or reported errors.",
                 "Back up important files immediately",
@@ -46,6 +53,7 @@ public static class RecommendationEngine
                 "Update the SSD firmware",
                 "For SATA drives replace the SATA cable and try another port",
                 "Run 'chkdsk /scan' from an admin command prompt");
+        Fix("Protect your data — drive problem", FixId.ScanDisk, FixId.RepairSystemFiles);
         if (Has(x => x.Title.Contains("overheating") || x.Title.Contains("runs hot") || x.Title.Contains("thermal throttling") || x.Title.Contains("hot spot")))
         {
             bool cpu = Has(x => x.Component == Component.Cpu && (x.Title.Contains("overheating") || x.Title.Contains("hot") || x.Title.Contains("throttl")));
@@ -78,7 +86,10 @@ public static class RecommendationEngine
         {
             uint? code = c.Signals.FirstOrDefault(s => s.BugCheckCode is > 0)?.BugCheckCode ?? c.Dumps.FirstOrDefault(d => d.Valid)?.BugCheckCode;
             if (code is uint bc && BugCheckKnowledgeBase.Get(bc) is BugCheckInfo kb && kb.Fixes.Length > 0)
+            {
                 Add(Severity.Critical, kb.LikelyComponent, $"Fix for {kb.Name}", kb.Meaning, kb.Fixes);
+                Fix($"Fix for {kb.Name}", FixesForBugCheck(bc));
+            }
             if (c.Kind == CrashKind.PowerLossOrHang)
             {
                 double p = c.PeakMetrics.GetValueOrDefault(KeyMetrics.CpuPower) + c.PeakMetrics.GetValueOrDefault(KeyMetrics.GpuPower);
@@ -106,14 +117,50 @@ public static class RecommendationEngine
             foreach (var d in hw.Disks.Where(d => d.WearPercent is > 80))
                 Add(Severity.Warning, Component.Storage, $"SSD nearly worn out: {d.Model}", $"Wear level {d.WearPercent:0}%.", "Back up and plan a replacement");
             foreach (var d in hw.Disks.Where(d => d.FreePercent is < 10))
+            {
                 Add(Severity.Info, Component.Storage, $"Low free space on {string.Join(", ", d.Volumes)}", $"Only {d.FreePercent:0}% free — SSDs slow down and Windows updates fail when nearly full.", "Free up space or move large files");
+                if (d.Volumes.Any(v => v.StartsWith("C", StringComparison.OrdinalIgnoreCase))) Fix($"Low free space on {string.Join(", ", d.Volumes)}", FixId.CleanTempFiles);
+            }
             if (hw.PowerPlan.Contains("saver", StringComparison.OrdinalIgnoreCase))
+            {
                 Add(Severity.Info, null, "Power saver plan is active", "Performance is being limited by Windows power settings.", "Switch to 'Balanced' or 'High performance' in Control Panel › Power Options");
+                Fix("Power saver plan is active", FixId.PowerPlanBalanced);
+            }
+            if (hw.CrashDumpSetting == 0)
+            {
+                Add(Severity.Warning, null, "Windows is not saving crash dumps", "When this PC blue-screens, no dump file is written, so the exact cause can't be read afterwards.", "Turn on 'small memory dump' in System Properties › Advanced › Startup and Recovery");
+                Fix("Windows is not saving crash dumps", FixId.EnableCrashDumps);
+            }
         }
+
+        // Crashes with GPU driver resets: offer the TDR delay.
+        if (r.Crash?.Signals.Any(x => x.Kind == SignalKind.GpuDriverReset) == true && r.Hardware?.TdrDelaySeconds is null or < 5)
+            foreach (var rec in list.Where(x => x.Component == Component.Gpu)) if (!rec.Fixes.Contains(FixId.IncreaseTdrDelay)) rec.Fixes.Add(FixId.IncreaseTdrDelay);
+        if (r.Crash != null && r.Hardware?.CrashDumpSetting == 0)
+            foreach (var rec in list.Where(x => x.Title.StartsWith("Fix for") || x.Title.StartsWith("Find out"))) if (!rec.Fixes.Contains(FixId.EnableCrashDumps)) rec.Fixes.Add(FixId.EnableCrashDumps);
 
         if (list.Count == 0 && r.Status == RunStatus.Completed)
             Add(Severity.Info, null, "No problems found", "Everything finished without errors and temperatures stayed in a safe range.", "For a deeper stability check, run the Burn test for 1–2 hours or the Overnight test");
 
         return list.OrderByDescending(x => x.Severity).ToList();
+    }
+
+    /// <summary>Which software fixes make sense for a stop code.</summary>
+    public static FixId[] FixesForBugCheck(uint code) => (code & 0x0FFFFFFF) switch
+    {
+        0x1A or 0x50 or 0x19 or 0x139 or 0x109 or 0x12B or 0x1C7 => new[] { FixId.MemoryDiagnostic, FixId.RepairSystemFiles },
+        0xEF or 0x3B or 0x7E or 0x1E or 0xC2 => new[] { FixId.RepairSystemFiles },
+        0x7A or 0xF4 or 0x154 or 0x133 => new[] { FixId.ScanDisk, FixId.RepairSystemFiles },
+        0x9F => new[] { FixId.DisableFastStartup },
+        0x116 or 0x117 => new[] { FixId.IncreaseTdrDelay },
+        _ => Array.Empty<FixId>(),
+    };
+
+    /// <summary>Checks that need no test run (hardware inventory + Windows settings only).</summary>
+    public static List<Recommendation> SystemChecks(HardwareInventory hw)
+    {
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        return r.Recommendations;
     }
 }
