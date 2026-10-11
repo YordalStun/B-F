@@ -44,7 +44,7 @@ public sealed class AiService : IDisposable
                     var url = await _local.StartAsync(model, progress, ct);
                     progress?.Report(new DownloadProgress("Thinking (local model)", 0, 0));
                     // Small models have small context windows: send a shorter summary.
-                    var prompt = AiAnalyzer.BuildPrompt(question, AiAnalyzer.BuildContext(runs, crashes, events, maxChars: 28_000));
+                    var prompt = AiAnalyzer.BuildPrompt(question, AiAnalyzer.BuildContext(runs, crashes, events, maxChars: 28_000, includeSensorHistory: false));
                     return await OpenAiCompatibleChat.AskAsync(url, model.Id, AiAnalyzer.SystemPrompt, prompt, ct);
                 }
                 catch (OperationCanceledException) { throw; }
@@ -55,7 +55,7 @@ public sealed class AiService : IDisposable
                 try
                 {
                     progress?.Report(new DownloadProgress("Asking " + s.CustomServerUrl, 0, 0));
-                    var prompt = AiAnalyzer.BuildPrompt(question, AiAnalyzer.BuildContext(runs, crashes, events, maxChars: 28_000));
+                    var prompt = AiAnalyzer.BuildPrompt(question, AiAnalyzer.BuildContext(runs, crashes, events, maxChars: 28_000, includeSensorHistory: false));
                     return await OpenAiCompatibleChat.AskAsync(s.CustomServerUrl, s.CustomServerModel, AiAnalyzer.SystemPrompt, prompt, ct);
                 }
                 catch (OperationCanceledException) { throw; }

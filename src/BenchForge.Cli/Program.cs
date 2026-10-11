@@ -18,6 +18,17 @@ if (oi >= 0 && oi + 1 < argList.Count) { outDir = argList[oi + 1]; argList.Remov
 if (argList.Count == 0) { Console.WriteLine("usage: benchforge-cli quick | bench <part> | stress <parts> <seconds> [--out dir]"); return 1; }
 if (outDir != null) DataPaths.Override(outDir);
 
+if (argList[0] == "export-ai")
+{
+    // benchforge-cli export-ai <folder with .bfresult files> <output.md>
+    var files = Directory.GetFiles(argList[1], "*.bfresult", SearchOption.AllDirectories);
+    var runs = files.Select(ResultStore.Load).Where(r => r != null).Select(r => r!).ToList();
+    var md = BenchForge.Core.Ai.AiExport.BuildMarkdown(runs);
+    File.WriteAllText(argList[2], md);
+    Console.WriteLine($"Wrote {argList[2]} ({md.Length / 1024} KB, {runs.Count} runs)");
+    return 0;
+}
+
 if (argList[0] == "recover")
 {
     foreach (var rec in SessionJournal.FindUnfinished())

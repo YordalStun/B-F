@@ -82,6 +82,14 @@ public sealed partial class EventsViewModel : PageViewModel
     }
 
     [RelayCommand]
+    private void ExportForAi()
+    {
+        if (Events.Count == 0) return;
+        AiExportService.Export(Array.Empty<RunResult>(), events: Events.Take(150).ToList(),
+            question: $"These are Windows events ({_lastSpec?.Description}). What do they tell you about problems with this PC, and what should I do?");
+    }
+
+    [RelayCommand]
     private void AskAi()
     {
         if (Events.Count == 0) return;

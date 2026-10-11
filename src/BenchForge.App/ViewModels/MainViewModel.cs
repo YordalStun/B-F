@@ -46,6 +46,17 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool _bannerIsCrash;
     [ObservableProperty] private string _statusText = "Starting sensors…";
     [ObservableProperty] private string _adminText = "";
+    /// <summary>Icon-only sidebar for small / laptop screens.</summary>
+    [ObservableProperty] private bool _isCompact;
+    private bool? _sidebarOverride;
+
+    public void UpdateLayoutMode(double windowWidth) => IsCompact = _sidebarOverride ?? windowWidth < 1150;
+
+    public void ToggleSidebar(double windowWidth)
+    {
+        _sidebarOverride = !IsCompact;
+        UpdateLayoutMode(windowWidth);
+    }
 
     public string DataFolder => DataPaths.Root + (DataPaths.IsPortable ? "  (portable)" : "");
 
@@ -153,6 +164,8 @@ public sealed partial class MainViewModel : ObservableObject
         if (MessageBox.Show(msg, "BenchForge fix", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         new Views.FixWindow(fix) { Owner = Application.Current.MainWindow }.Show();
     }
+
+    [RelayCommand] private Task ExportEverythingForAi() => AiExportService.ExportEverything();
 
     [RelayCommand] private void DismissBanner() => Banner = null;
     [RelayCommand] private void OpenDataFolder() { try { Process.Start("explorer.exe", DataPaths.Root); } catch { } }

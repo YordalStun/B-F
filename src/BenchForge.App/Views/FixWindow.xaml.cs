@@ -12,6 +12,9 @@ public partial class FixWindow : Window
     public FixWindow(FixInfo fix)
     {
         InitializeComponent();
+        var wa = SystemParameters.WorkArea;
+        Width = Math.Min(Width, wa.Width * 0.9);
+        Height = Math.Min(Height, wa.Height * 0.9);
         _fix = fix;
         TitleText.Text = fix.Title;
         StatusText.Text = "Working…";

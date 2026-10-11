@@ -91,7 +91,7 @@ public sealed class AiAnalyzer
     }
 
     /// <summary>The compact, human-readable data summary sent to the AI (also handy to copy/paste anywhere).</summary>
-    public static string BuildContext(IReadOnlyList<RunResult> runs, IReadOnlyList<SystemCrash>? crashes = null, IReadOnlyList<EventEntry>? events = null, int maxChars = 150_000)
+    public static string BuildContext(IReadOnlyList<RunResult> runs, IReadOnlyList<SystemCrash>? crashes = null, IReadOnlyList<EventEntry>? events = null, int maxChars = 150_000, bool includeSensorHistory = true)
     {
         var sb = new StringBuilder();
         var hw = runs.Select(r => r.Hardware).FirstOrDefault(h => h != null);
@@ -125,6 +125,8 @@ public sealed class AiAnalyzer
             }
             if (r.KeyStats.Count > 0)
                 sb.AppendLine("Sensors (min/avg/max): " + string.Join("; ", r.KeyStats.Select(kv => $"{kv.Value.Name} {kv.Value.Min:0.#}/{kv.Value.Avg:0.#}/{kv.Value.Max:0.#} {kv.Value.Unit}")));
+            if (includeSensorHistory && AiExport.SensorTable(r.Timeline, 60) is string table)
+                sb.AppendLine("Sensor history (CSV, t = seconds since start):").Append(table);
             foreach (var e in r.Errors.Take(15)) sb.AppendLine($"Error {e.Time:HH:mm:ss} {e.Component.Display()} {e.Test}: {e.Message} {e.Detail}");
             if (r.TotalErrorCount > 15) sb.AppendLine($"... {r.TotalErrorCount} errors in total");
             if (r.Crash is CrashInfo c) AppendCrash(sb, c);

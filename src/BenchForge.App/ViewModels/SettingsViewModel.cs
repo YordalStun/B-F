@@ -201,7 +201,7 @@ public sealed partial class AiChatViewModel : ObservableObject
     [RelayCommand]
     private async Task Ask()
     {
-        if (!IsConfigured) { Status = "AI is off. Choose a local model or Claude in Settings."; return; }
+        if (!IsConfigured) { Status = "AI is off in Settings. Use 'Save file for another AI' and upload the file to Claude.ai or any AI chat instead."; return; }
         IsBusy = true;
         Answer = "";
         _cts = new CancellationTokenSource();
@@ -225,6 +225,9 @@ public sealed partial class AiChatViewModel : ObservableObject
     {
         try { Clipboard.SetText(ContextPreview); Status = "Copied — you can paste the data into any AI chat."; } catch { }
     }
+
+    [RelayCommand]
+    private void SaveForAi() => AiExportService.Export(_runs, _crashes, _events, Question);
 
     [RelayCommand]
     private void CopyAnswer()

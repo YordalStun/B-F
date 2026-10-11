@@ -25,6 +25,8 @@ public sealed class FailureCase
     public List<string> RamBits { get; set; } = new();
     public string? HardwareFingerprint { get; set; }
     public Component? Suspected { get; set; }
+    /// <summary>Only BenchForge stopped (closed/killed) — no hardware evidence at all.</summary>
+    public bool AppOnly { get; set; }
 
     public static FailureCase FromRun(RunResult r)
     {
@@ -65,6 +67,9 @@ public sealed class FailureCase
             fc.ErrorsByComponent[m.Component] = fc.ErrorsByComponent.GetValueOrDefault(m.Component) + Math.Max(1, m.ErrorCount);
         if (r.Crash != null && fc.ErrorsByComponent.Count == 0 && r.Errors.Count > 0)
             foreach (var g in r.Errors.GroupBy(e => e.Component)) fc.ErrorsByComponent[g.Key] = g.Count();
+        fc.AppOnly = fc.CrashKind == CrashKind.AppTerminated && fc.ErrorsByComponent.Count == 0 &&
+                     !fc.Signals.Any(s => s.Kind is SignalKind.WheaFatal or SignalKind.WheaCorrected or SignalKind.GpuDriverReset or SignalKind.BugCheck);
+        if (fc.AppOnly) fc.Suspected = null;
         fc.ErrorThreads = r.Errors.Where(e => e.Component == Component.Cpu && e.Thread != null).Select(e => e.Thread!.Value).Distinct().OrderBy(x => x).ToList();
         foreach (var m in r.AllModules.Where(m => m.Info.ContainsKey("Failing bit positions")))
             fc.RamBits.AddRange(m.Info["Failing bit positions"].Split(", ").Select(b => b.Split(' ')[0] + " " + b.Split(' ')[1]));
@@ -102,9 +107,19 @@ public sealed class PatternReport
 /// </summary>
 public static class PatternAnalyzer
 {
-    public static PatternReport Analyze(IReadOnlyList<FailureCase> cases, IReadOnlyList<RunResult>? passingRuns = null)
+    public static PatternReport Analyze(IReadOnlyList<FailureCase> allCases, IReadOnlyList<RunResult>? passingRuns = null)
     {
-        var rep = new PatternReport { CaseCount = cases.Count };
+        var rep = new PatternReport { CaseCount = allCases.Count };
+        // Runs where only BenchForge was closed carry no hardware evidence: report them but don't let them vote.
+        var appOnly = allCases.Where(c => c.AppOnly).ToList();
+        var cases = allCases.Where(c => !c.AppOnly).ToList();
+        if (appOnly.Count > 0)
+            rep.Findings.Add(new Finding { Severity = Severity.Info, Title = $"{appOnly.Count} of the selected runs only had BenchForge close unexpectedly", Detail = "Windows kept running and no hardware errors were logged, so these are not counted as hardware crashes.", Confidence = 1 });
+        if (cases.Count == 0 && appOnly.Count > 0)
+        {
+            rep.Verdict = "No hardware crash to analyse — BenchForge itself was closed or killed. If you didn't close it, check antivirus and run the test again.";
+            return rep;
+        }
         if (cases.Count == 0)
         {
             rep.Verdict = "None of the selected items are crashes or runs with errors, so there is no failure pattern to look for.";

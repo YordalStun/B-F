@@ -1,18 +1,17 @@
 <UserControl x:Class="BenchForge.App.Views.RunSetupView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid Margin="26,22">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition />
-            <ColumnDefinition Width="380" />
-        </Grid.ColumnDefinitions>
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:BenchForge.App.Controls">
+<ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <c:ViewportPanel MinViewportHeight="560" Margin="20,16">
+    <c:AdaptiveSplit Breakpoint="880" FixedWidth="360" FixedChild="1" NarrowFirstRatio="0.58">
         <ScrollViewer Padding="0,0,18,0">
             <StackPanel>
                 <TextBlock Text="Run tests" Style="{StaticResource H1}" />
                 <TextBlock Text="Pick what to run. Every test is time-boxed, so you always know exactly how long is left — leave it running and come back." Style="{StaticResource MutedText}" Margin="0,2,0,16" />
 
                 <ItemsControl ItemsSource="{Binding Presets}">
-                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><c:AdaptiveColumns MinItemWidth="290" MaxColumns="2" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
                             <RadioButton Style="{StaticResource OptionCard}" GroupName="preset" IsChecked="{Binding IsSelected, Mode=TwoWay}">
@@ -170,5 +169,7 @@
                 </ScrollViewer>
             </DockPanel>
         </Border>
-    </Grid>
+    </c:AdaptiveSplit>
+    </c:ViewportPanel>
+    </ScrollViewer>
 </UserControl>

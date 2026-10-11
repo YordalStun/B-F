@@ -147,6 +147,15 @@ public sealed partial class CrashesViewModel : PageViewModel
     }
 
     [RelayCommand]
+    private void ExportForAi()
+    {
+        var items = Selection.Count > 0 ? Selection.ToList() : Crashes.Take(10).ToList();
+        if (items.Count == 0) { MessageBox.Show("No crashes to export. Use 'Export everything for AI' on the dashboard for a full report.", "BenchForge"); return; }
+        AiExportService.Export(items.Where(i => i.Run != null).Select(i => i.Run!).ToList(), items.Where(i => i.Run == null).Select(i => i.Crash).ToList(),
+            question: "Look at these crashes. What do they have in common, what is the most likely cause, and what should I do?");
+    }
+
+    [RelayCommand]
     private async Task DeepAnalyze(MinidumpInfo? dump)
     {
         if (dump == null) return;

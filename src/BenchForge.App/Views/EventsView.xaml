@@ -1,7 +1,10 @@
 <UserControl x:Class="BenchForge.App.Views.EventsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid Margin="26,22">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:BenchForge.App.Controls">
+<ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <c:ViewportPanel MinViewportHeight="640" Margin="20,16">
+    <Grid>
         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /></Grid.RowDefinitions>
         <StackPanel>
             <TextBlock Text="Event Viewer" Style="{StaticResource H1}" />
@@ -41,12 +44,12 @@
                 <CheckBox Content="Information" IsChecked="{Binding Information}" />
                 <TextBox Width="200" Text="{Binding TextFilter, UpdateSourceTrigger=PropertyChanged}" ToolTip="Text, source or event ID" Margin="0,0,8,6" />
                 <Button Content="Filter" Command="{Binding FilterCommand}" Margin="0,0,8,6" />
+                <Button Content="Export for AI" Command="{Binding ExportForAiCommand}" Margin="0,0,8,6" />
                 <Button Content="Ask AI about these" Command="{Binding AskAiCommand}" Margin="0,0,8,6" />
             </WrapPanel>
             <TextBlock Text="{Binding Description}" FontWeight="SemiBold" Margin="0,0,0,8" />
         </StackPanel>
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="3*" /><ColumnDefinition Width="14" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+        <c:AdaptiveSplit Grid.Row="1" Breakpoint="950" FixedWidth="380" FixedChild="1" NarrowFirstRatio="0.6">
             <DataGrid ItemsSource="{Binding Events}" SelectedItem="{Binding Selected}" SelectionMode="Single">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Time" Binding="{Binding Time, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="140" />
@@ -66,6 +69,8 @@
                     </StackPanel>
                 </ScrollViewer>
             </Border>
-        </Grid>
+        </c:AdaptiveSplit>
     </Grid>
+    </c:ViewportPanel>
+    </ScrollViewer>
 </UserControl>

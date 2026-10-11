@@ -65,6 +65,15 @@ public sealed partial class HistoryViewModel : PageViewModel
     }
 
     [RelayCommand]
+    private void ExportForAi()
+    {
+        var runs = LoadSelected();
+        if (runs.Count == 0) runs = Runs.Take(10).Select(s => ResultStore.Load(s.FilePath)).Where(r => r != null).Select(r => r!).ToList();
+        if (runs.Count == 0) { MessageBox.Show("There are no saved runs yet.", "BenchForge"); return; }
+        AiExportService.Export(runs);
+    }
+
+    [RelayCommand]
     private void Import()
     {
         var dlg = new OpenFileDialog { Filter = "BenchForge results (*.bfresult)|*.bfresult|All files|*.*", Multiselect = true, Title = "Import results from another PC" };
@@ -156,6 +165,9 @@ public sealed partial class CompareViewModel : PageViewModel
         NextSteps.Clear(); foreach (var s in _report.NextSteps) NextSteps.Add(s);
         Loaded?.Invoke();
     }
+
+    [RelayCommand]
+    private void ExportForAi() => AiExportService.Export(Runs.ToList(), question: "Compare these runs. If any crashed or found errors, what do they have in common and what is the most likely cause? If none failed, explain the performance differences.");
 
     [RelayCommand]
     private void AskAi() => Main.AskAi($"Ask AI to compare {Runs.Count} runs", Runs.ToList(), question: "Compare these runs. If any crashed or found errors, what do they have in common and what is the most likely cause? If none failed, explain the performance differences.");

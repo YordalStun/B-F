@@ -208,6 +208,9 @@ public sealed partial class ResultsViewModel : PageViewModel
     }
 
     [RelayCommand]
+    private void ExportForAi() { if (Result != null) AiExportService.Export(new[] { Result }); }
+
+    [RelayCommand]
     private void AskAi()
     {
         if (Result != null) Main.AskAi($"Ask AI about \"{Result.DisplayName}\"", new[] { Result });

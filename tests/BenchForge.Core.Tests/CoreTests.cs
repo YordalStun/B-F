@@ -1,3 +1,4 @@
+using BenchForge.Core.Ai;
 using BenchForge.Core.Analysis;
 using BenchForge.Core.Cpu;
 using BenchForge.Core.Crash;
@@ -405,5 +406,96 @@ public class FixTests
         Assert.Contains(checks, r => r.Fixes.Contains(FixId.EnableCrashDumps));
         Assert.Contains(checks, r => r.Fixes.Contains(FixId.PowerPlanBalanced));
         Assert.DoesNotContain(checks, r => r.Title == "No problems found");
+    }
+}
+
+public class AiExportTests
+{
+    private static RunResult CrashedRun()
+    {
+        var start = new DateTime(2026, 10, 1, 20, 0, 0);
+        var r = new RunResult { Name = "Burn test", StartTime = start, EndTime = start.AddMinutes(22), Status = RunStatus.Crashed, MachineName = "TESTPC" };
+        r.Hardware = new HardwareInventory { ComputerName = "TESTPC", Cpu = { Name = "Test CPU 9000" }, CrashDumpSetting = 3 };
+        r.Timeline.Channels.Add(new SensorChannel { Id = KeyMetrics.ChannelId(KeyMetrics.CpuTemp), Name = "CPU temperature", Unit = "°C" });
+        r.Timeline.Channels.Add(new SensorChannel { Id = "test/cpu.stress", Name = "CPU stress throughput", Unit = "pts/s", HwType = HwType.Test });
+        for (int i = 0; i < 1000; i++) r.Timeline.Samples.Add(new TimelineSample { T = i, V = new float?[] { 60 + i % 40, 1000 } });
+        r.Crash = new CrashInfo
+        {
+            Kind = CrashKind.BlueScreen, Summary = "Blue screen 0x124 WHEA_UNCORRECTABLE_ERROR", StepName = "Burn 2", ActiveComponents = { Component.Cpu },
+            Signals = { new CrashSignal { Kind = SignalKind.BugCheck, BugCheckCode = 0x124, Title = "Blue screen: 0x124" } },
+            Tail = { new HeartbeatSample { Time = start.AddMinutes(22), Metrics = { [KeyMetrics.CpuTemp] = 97 } } },
+        };
+        return r;
+    }
+
+    [Fact]
+    public void Export_contains_everything_an_ai_needs()
+    {
+        var md = AiExport.BuildMarkdown(new[] { CrashedRun() }, now: new DateTime(2026, 10, 2));
+        Assert.StartsWith("# BenchForge diagnostics for AI analysis", md);
+        Assert.Contains("## Instructions for the AI", md);
+        Assert.Contains("Test CPU 9000", md);
+        Assert.Contains("0x124", md);
+        Assert.Contains("```csv", md);
+        Assert.Contains("t,cpu.temp", md);
+        Assert.Contains("BenchForge's own analysis", md);
+        Assert.Contains("crash dumps small (minidump)", md);
+    }
+
+    [Fact]
+    public void Sensor_table_is_downsampled_and_keeps_peaks()
+    {
+        var table = AiExport.SensorTable(CrashedRun().Timeline, 150)!;
+        var rows = table.Trim().Split('\n');
+        Assert.True(rows.Length <= 151);
+        Assert.Contains("99", table); // peak temperature of each bucket survives
+    }
+
+    [Fact]
+    public void Export_respects_size_limit()
+    {
+        var runs = Enumerable.Range(0, 60).Select(_ => CrashedRun()).ToList();
+        var events = Enumerable.Range(0, 400).Select(i => new EventEntry { Provider = "disk", Id = 7, Level = 2, Time = DateTime.Now, Message = new string('x', 600) }).ToList();
+        var md = AiExport.BuildMarkdown(runs, events: events);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(md) <= AiExport.MaxBytes);
+        Assert.Contains("## Instructions for the AI", md);
+    }
+}
+
+public class AiExportEverythingTests
+{
+    [Fact]
+    public void Extras_and_all_sensor_stats_are_included()
+    {
+        var r = new RunResult { Name = "Quick benchmark", StartTime = DateTime.Now, Status = RunStatus.Completed };
+        r.SensorStats.Add(new ChannelStats { Id = "/amdcpu/0/temperature/2", Hardware = "AMD Ryzen 7", Name = "Core (Tctl/Tdie)", Kind = SensorKind.Temperature, HwType = HwType.Cpu, Min = 40, Avg = 70, Max = 88, Unit = "°C" });
+        var extras = new DiagnosticsExtras
+        {
+            Drivers = { new DriverEntry("DISPLAY", "NVIDIA GeForce RTX 3070", "NVIDIA", "32.0.15.6094", new DateTime(2024, 8, 1)) },
+            Reliability = { new ReliabilityEntry(DateTime.Now, "Windows Error Reporting", "game.exe", "Stopped working", 1001) },
+            RecentErrors = { new EventEntry { Log = "System", Provider = "disk", Id = 7, Level = 2, Time = DateTime.Now, Message = "bad block" } },
+            AppLogTail = { "2026-10-11 sensor started" },
+        };
+        var md = AiExport.BuildMarkdown(new[] { r }, extras: extras);
+        Assert.Contains("Every sensor during this run", md);
+        Assert.Contains("Core (Tctl/Tdie)", md);
+        Assert.Contains("RTX 3070", md);
+        Assert.Contains("Reliability Monitor", md);
+        Assert.Contains("bad block", md);
+        Assert.Contains("BenchForge app log", md);
+    }
+
+    [Fact]
+    public void Full_sensor_csv_has_every_channel()
+    {
+        var tl = new SensorTimeline();
+        tl.Channels.Add(new SensorChannel { Id = "a", Hardware = "CPU", Name = "Temp", Unit = "°C" });
+        tl.Channels.Add(new SensorChannel { Id = "b", Hardware = "GPU", Name = "Load", Unit = "%" });
+        tl.Samples.Add(new TimelineSample { T = 0, V = new float?[] { 50, null } });
+        tl.Samples.Add(new TimelineSample { T = 1, V = new float?[] { 51.5f, 99 } });
+        var csv = AiExport.FullSensorCsv(tl).Trim().Split('\n');
+        Assert.Equal(3, csv.Length);
+        Assert.Contains("CPU / Temp", csv[0]);
+        Assert.Equal("1,51.5,99", csv[2].Trim());
     }
 }
