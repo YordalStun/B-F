@@ -80,6 +80,7 @@ public sealed partial class MetricTile : ObservableObject
         _min = Math.Min(_min, v); _max = Math.Max(_max, v);
         Display = Format(v, Unit);
         Range = $"min {Format(_min, "")}  ·  max {Format(_max, "")}";
+        if (Id == KeyMetrics.OnAc) { Display = v >= 0.5 ? "Plugged in" : "On battery"; Range = v >= 0.5 ? "charger connected" : "plug in for full performance"; }
         _history.Add(v);
         if (_history.Count > 120) _history.RemoveAt(0);
         Version++;

@@ -62,6 +62,7 @@ public sealed partial class LiveRunViewModel : PageViewModel
     [ObservableProperty] private string _overlayGpu = "";
     [ObservableProperty] private string _overlayRam = "";
     [ObservableProperty] private string _overlayExtra = "";
+    [ObservableProperty] private bool _onBattery;
 
     public void Start(TestPlan plan)
     {
@@ -154,6 +155,11 @@ public sealed partial class LiveRunViewModel : PageViewModel
         OverlayCpu = $"CPU  {V(KeyMetrics.CpuTemp)}  {V(KeyMetrics.CpuLoad)}  {V(KeyMetrics.CpuClock)}  {V(KeyMetrics.CpuPower)}";
         OverlayGpu = $"GPU  {V(KeyMetrics.GpuTemp)}  {V(KeyMetrics.GpuLoad)}  {V(KeyMetrics.GpuClock)}  {V(KeyMetrics.GpuPower)}" + (fps != null ? $"  {fps.Value:0} FPS" : "");
         OverlayRam = $"RAM  {V(KeyMetrics.RamLoad)}" + (key.ContainsKey(KeyMetrics.GpuHotspot) ? $"   Hot spot {V(KeyMetrics.GpuHotspot)}" : "") + (key.ContainsKey(KeyMetrics.DiskTemp) ? $"   Drive {V(KeyMetrics.DiskTemp)}" : "");
+        if (key.TryGetValue(KeyMetrics.OnAc, out var ac))
+        {
+            OnBattery = ac < 0.5;
+            OverlayRam += ac < 0.5 ? $"   ON BATTERY {V(KeyMetrics.BatteryLevel)}" : "   Charger ✓";
+        }
     }
 
     /// <summary>Keeps the overlay alive between runs (shows idle sensors when no test runs).</summary>

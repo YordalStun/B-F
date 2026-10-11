@@ -16,8 +16,15 @@ public sealed class TestStep
     public override string ToString() => $"{Name} ({TimeFormat.Short(TimeSpan.FromSeconds(DurationSeconds))})";
 }
 
+public enum LaptopMode { Auto, On, Off }
+
 public sealed class TestSettings
 {
+    /// <summary>Auto = laptop rules when a laptop is detected.</summary>
+    public LaptopMode LaptopMode { get; set; } = LaptopMode.Auto;
+    /// <summary>Resolved at start: judge this run with laptop rules (running at the thermal limit is normal).</summary>
+    public bool LaptopRules { get; set; }
+
     public CpuStressMode CpuStressMode { get; set; } = CpuStressMode.Mixed;
     /// <summary>0 = all logical processors.</summary>
     public int CpuThreads { get; set; }

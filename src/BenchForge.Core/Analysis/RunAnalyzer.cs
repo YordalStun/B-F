@@ -8,8 +8,11 @@ public static class RunAnalyzer
     public static void Analyze(RunResult r)
     {
         var f = new List<Finding>();
-        Temperatures(r, f);
-        Throttling(r, f);
+        bool laptop = r.Plan.Settings.LaptopRules;
+        if (laptop) LaptopTemperatures(r, f); else Temperatures(r, f);
+        Cooling(r, f, laptop);
+        if (laptop) LaptopClocks(r, f); else Throttling(r, f);
+        PowerAndBattery(r, f);
         Errors(r, f);
         Performance(r, f);
         Power(r, f);
@@ -19,6 +22,127 @@ public static class RunAnalyzer
 
     private static double? Max(RunResult r, string key) => r.KeyStats.TryGetValue(key, out var s) ? s.Max : null;
     private static double? Avg(RunResult r, string key) => r.KeyStats.TryGetValue(key, out var s) ? s.Avg : null;
+
+    /// <summary>Laptops are designed to sit at the thermal limit; judge sustained performance instead of temperature.</summary>
+    private static void LaptopTemperatures(RunResult r, List<Finding> f)
+    {
+        if (Max(r, KeyMetrics.CpuTemp) is double ct)
+        {
+            double atLimit = ShareAtOrAbove(r, KeyMetrics.CpuTemp, 94);
+            if (ct >= 105) f.Add(new Finding { Severity = Severity.Critical, Component = Component.Cpu, Title = $"CPU went above its maximum ({ct:0} °C)", Detail = "Even laptops should not exceed ~100–105 °C. The cooling system may be blocked or failing." });
+            else if (ct >= 94) f.Add(new Finding { Severity = Severity.Info, Component = Component.Cpu, Title = $"CPU ran at its thermal limit ({ct:0} °C, {atLimit:P0} of the time) — normal for laptops", Detail = "Laptop CPUs are designed to run at their limit and slow down just enough to stay there. What matters is how much performance they keep — see the cooling result." });
+            else f.Add(new Finding { Severity = Severity.Info, Component = Component.Cpu, Title = $"CPU temperature OK (max {ct:0} °C)" });
+        }
+        if (Max(r, KeyMetrics.GpuTemp) is double gt)
+        {
+            if (gt >= 95) f.Add(new Finding { Severity = Severity.Warning, Component = Component.Gpu, Title = $"GPU very hot ({gt:0} °C)", Detail = "Above what most laptop GPUs allow. Check vents and fans for dust." });
+            else if (gt >= 85) f.Add(new Finding { Severity = Severity.Info, Component = Component.Gpu, Title = $"GPU at its laptop limit ({gt:0} °C) — normal under full load" });
+            else f.Add(new Finding { Severity = Severity.Info, Component = Component.Gpu, Title = $"GPU temperature OK (max {gt:0} °C)" });
+        }
+        if (Max(r, KeyMetrics.GpuHotspot) is double hs && hs >= 110)
+            f.Add(new Finding { Severity = Severity.Warning, Component = Component.Gpu, Title = $"GPU hot spot very high ({hs:0} °C)", Detail = "Could mean worn thermal paste or a blocked heatsink." });
+        if (Max(r, KeyMetrics.DiskTemp) is double dt && dt >= 75)
+            f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"Drive runs hot ({dt:0} °C)", Detail = "Laptop NVMe drives throttle when hot; heavy writes will slow down." });
+        if (Max(r, KeyMetrics.CpuTemp) is double c2 && c2 > 80 && r.KeyStats.TryGetValue(KeyMetrics.CpuFan, out var fan) && fan.Max < 100)
+            f.Add(new Finding { Severity = Severity.Critical, Component = Component.Cpu, Title = "Fan not detected spinning", Detail = $"CPU reached {c2:0} °C while the fan reported {fan.Max:0} RPM. Check the fan works (listen for it under load)." });
+    }
+
+    /// <summary>On laptops only a drop below the CPU's base clock under load is a real problem.</summary>
+    private static void LaptopClocks(RunResult r, List<Finding> f)
+    {
+        int baseClock = r.Hardware?.Cpu.MaxClockMHz ?? 0;
+        if (baseClock <= 0) return;
+        var clock = r.Timeline.Series(KeyMetrics.ChannelId(KeyMetrics.CpuClock)).ToList();
+        foreach (var step in r.Steps.Where(s => s.Kind == StepKind.Stress && s.Components.Contains(Component.Cpu) && s.End != null))
+        {
+            double t0 = (step.Start - r.StartTime).TotalSeconds + 30, t1 = (step.End!.Value - r.StartTime).TotalSeconds;
+            var win = clock.Where(p => p.T >= t0 && p.T <= t1).Select(p => p.V).ToList();
+            if (win.Count < 10) continue;
+            double avg = win.Average();
+            if (avg < baseClock * 0.8)
+            {
+                f.Add(new Finding { Severity = Severity.Warning, Component = Component.Cpu, Title = $"CPU fell below its base clock under load ({avg:0} MHz vs {baseClock} MHz base)", Detail = "Running below base speed means the laptop is throttling hard — heat, a weak/unoriginal charger, or a quiet/battery-saver power mode." });
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cooling result: how much of its early peak performance the CPU keeps during a sustained stress step
+    /// (uses BenchForge's own throughput measurement, so it works even without temperature sensors).
+    /// </summary>
+    private static void Cooling(RunResult r, List<Finding> f, bool laptop)
+    {
+        var series = r.Timeline.Series("test/cpu.stress").ToList();
+        if (series.Count < 30) return;
+        double? best = null;
+        foreach (var step in r.Steps.Where(s => s.Kind == StepKind.Stress && s.Components.Contains(Component.Cpu) && s.End != null))
+        {
+            double start = (step.Start - r.StartTime).TotalSeconds, end = (step.End!.Value - r.StartTime).TotalSeconds;
+            if (end - start < 60) continue;
+            var win = series.Where(p => p.T >= start + 3 && p.T <= end - 1).ToList();
+            if (win.Count < 30) continue;
+            var early = win.Where(p => p.T <= start + 18).Select(p => p.V).ToList();
+            var late = win.Skip((int)(win.Count * 0.7)).Select(p => p.V).ToList();
+            if (early.Count < 5 || late.Count < 5) continue;
+            double ratio = SustainedRatio(early, late);
+            best = best == null ? ratio : Math.Min(best.Value, ratio);
+            var module = step.Modules.FirstOrDefault(m => m.Component == Component.Cpu);
+            module?.SubScores.Add(new SubScore { Name = "Sustained performance (cooling)", Group = "Stress", Value = Math.Round(ratio * 100, 1), Unit = "% of peak" });
+        }
+        if (best is not double b) return;
+        var (sev, verdict, detail) = CoolingVerdict(b, laptop);
+        f.Add(new Finding
+        {
+            Severity = sev, Component = Component.Cpu,
+            Title = $"Cooling: {verdict} — CPU keeps {b:P0} of its peak performance under sustained load",
+            Detail = detail,
+        });
+    }
+
+    public static double SustainedRatio(IReadOnlyList<double> early, IReadOnlyList<double> late)
+    {
+        // Peak = average of the best half of the early samples (ignores ramp-up noise).
+        double peak = early.OrderByDescending(x => x).Take(Math.Max(1, early.Count / 2)).Average();
+        return peak <= 0 ? 0 : Math.Min(1.05, late.Average() / peak);
+    }
+
+    public static (Severity Severity, string Verdict, string Detail) CoolingVerdict(double ratio, bool laptop) => ratio switch
+    {
+        >= 0.90 => (Severity.Info, "Excellent", "Performance barely drops when hot — the cooling keeps up."),
+        >= 0.80 => (Severity.Info, laptop ? "Good (typical laptop)" : "Good", laptop ? "A small drop is normal for laptops as they settle at their power/temperature limit." : "A small drop as the PC heats up."),
+        >= 0.65 => (Severity.Warning, "Weak — cooling is struggling", "The CPU loses a noticeable amount of speed once hot. Cleaning dust, better airflow or a performance power mode usually helps."),
+        _ => (Severity.Critical, "Poor — heavy thermal throttling", "The CPU loses a lot of speed under sustained load. The cooling system is likely clogged, the fan weak, or the thermal paste dried out."),
+    };
+
+    private static double ShareAtOrAbove(RunResult r, string key, double limit)
+    {
+        var s = r.Timeline.Series(KeyMetrics.ChannelId(key)).Select(p => p.V).ToList();
+        return s.Count == 0 ? 0 : s.Count(v => v >= limit) / (double)s.Count;
+    }
+
+    private static void PowerAndBattery(RunResult r, List<Finding> f)
+    {
+        var ac = r.Timeline.Series(KeyMetrics.ChannelId(KeyMetrics.OnAc)).ToList();
+        if (ac.Count > 0)
+        {
+            int off = ac.Count(p => p.V < 0.5);
+            if (off == ac.Count)
+                f.Add(new Finding { Severity = Severity.Warning, Title = "The whole test ran on battery", Detail = "On battery the PC is power-limited — scores and stress results are lower than with the charger plugged in." });
+            else if (off > 0)
+            {
+                var first = ac.First(p => p.V < 0.5);
+                f.Add(new Finding { Severity = Severity.Warning, Title = $"Charger was disconnected {TimeFormat.Short(TimeSpan.FromSeconds(first.T))} into the test", Detail = "Results after that point are power-limited. If you didn't unplug it, check the charger, cable and laptop power socket." });
+            }
+        }
+        if (r.Hardware is { BatteryWearPercent: double wear } && wear >= 30)
+            f.Add(new Finding
+            {
+                Severity = wear >= 50 ? Severity.Warning : Severity.Info,
+                Title = $"Battery holds only {100 - wear:0}% of its original charge",
+                Detail = $"Design {r.Hardware.BatteryDesignCapacityWh:0.#} Wh, now {r.Hardware.BatteryFullChargeWh:0.#} Wh." + (wear >= 50 ? " A worn battery can also cause sudden shut-offs under heavy load." : ""),
+            });
+    }
 
     private static void Temperatures(RunResult r, List<Finding> f)
     {
@@ -78,7 +202,7 @@ public static class RunAnalyzer
         foreach (var m in r.AllModules.Where(m => m.Component == Component.Cpu && m.Kind == StepKind.Stress))
         {
             var drop = m.SubScores.FirstOrDefault(s => s.Name == "Throughput drop over test");
-            if (drop != null && drop.Value >= 10 && !f.Any(x => x.Component == Component.Cpu && x.Title.Contains("throttl")))
+            if (drop != null && drop.Value >= 10 && !f.Any(x => x.Component == Component.Cpu && (x.Title.Contains("throttl") || x.Title.StartsWith("Cooling:"))))
                 f.Add(new Finding { Severity = Severity.Warning, Component = Component.Cpu, Title = $"CPU performance dropped {drop.Value:0}% during the stress test", Detail = "Sustained performance fell over time — typically heat or power limits (throttling)." });
         }
     }

@@ -99,6 +99,12 @@ public sealed class LhmSensorProvider : ISensorProvider
     /// <summary>When LHM can't read CPU load/temperature (no driver), fall back to Windows counters / ACPI thermal zone.</summary>
     private void AddFallbacks(SensorSnapshot snap)
     {
+        var (onAc, hasBattery, pct) = Core.Platform.PowerStatus.Get();
+        if (hasBattery && onAc is bool ac)
+        {
+            snap.Readings.Add(new SensorReading(KeyMetrics.AcReadingId, "Power", HwType.Psu, SensorKind.Other, "Charger connected", ac ? 1 : 0, ""));
+            if (pct is int p) snap.Readings.Add(new SensorReading("/power/battery", "Power", HwType.Psu, SensorKind.Level, "Battery level", p, "%"));
+        }
         if (!snap.Readings.Any(r => r.HwType == HwType.Cpu && r.Kind == SensorKind.Load && r.Name.Contains("Total")))
         {
             try

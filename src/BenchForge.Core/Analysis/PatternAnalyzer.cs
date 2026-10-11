@@ -25,6 +25,8 @@ public sealed class FailureCase
     public List<string> RamBits { get; set; } = new();
     public string? HardwareFingerprint { get; set; }
     public Component? Suspected { get; set; }
+    /// <summary>Run used laptop rules (CPU at ~95–100 °C is normal).</summary>
+    public bool Laptop { get; set; }
     /// <summary>Only BenchForge stopped (closed/killed) — no hardware evidence at all.</summary>
     public bool AppOnly { get; set; }
 
@@ -38,6 +40,7 @@ public sealed class FailureCase
             IsCrash = r.Crash != null,
             CrashKind = r.Crash?.Kind ?? CrashKind.Unknown,
             Suspected = r.Crash?.SuspectedComponent,
+            Laptop = r.Plan.Settings.LaptopRules,
             HardwareFingerprint = r.Hardware == null ? null : $"{r.Hardware.Cpu.Name}|{string.Join(",", r.Hardware.Gpus.Select(g => g.Name))}|{r.Hardware.TotalMemoryGB:0}",
         };
         if (r.Crash is CrashInfo c)
@@ -187,7 +190,7 @@ public static class PatternAnalyzer
         // 5. Temperatures at the time.
         foreach (var (key, limit, comp) in new[] { (KeyMetrics.CpuTemp, 90.0, Component.Cpu), (KeyMetrics.GpuTemp, 83.0, Component.Gpu), (KeyMetrics.GpuHotspot, 100.0, Component.Gpu), (KeyMetrics.GpuMemTemp, 98.0, Component.Gpu), (KeyMetrics.DiskTemp, 70.0, Component.Storage) })
         {
-            var hot = cases.Where(c => c.Peak.TryGetValue(key, out var v) && v >= limit).ToList();
+            var hot = cases.Where(c => c.Peak.TryGetValue(key, out var v) && v >= (c.Laptop && key == KeyMetrics.CpuTemp ? 100 : limit)).ToList();
             int withData = cases.Count(c => c.Peak.ContainsKey(key));
             if (hot.Count >= 2 || (hot.Count >= 1 && withData == 1 && n == 1))
             {

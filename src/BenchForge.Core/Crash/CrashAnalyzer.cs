@@ -201,7 +201,8 @@ public static class CrashAnalyzer
         double Peak(string k) => c.PeakMetrics.TryGetValue(k, out var v) ? v : c.LastMetrics.GetValueOrDefault(k, double.NaN);
         double cpuT = Peak(KeyMetrics.CpuTemp), gpuT = Peak(KeyMetrics.GpuTemp), hot = Peak(KeyMetrics.GpuHotspot);
         double cpuP = Peak(KeyMetrics.CpuPower), gpuP = Peak(KeyMetrics.GpuPower);
-        if (!double.IsNaN(cpuT) && cpuT >= 90) { ex.Add($"CPU temperature was very high ({cpuT:0} °C) just before the crash."); Vote(Component.Cpu, 1.5); }
+        double cpuHot = settings?.LaptopRules == true ? 100 : 90;
+        if (!double.IsNaN(cpuT) && cpuT >= cpuHot) { ex.Add($"CPU temperature was very high ({cpuT:0} °C) just before the crash."); Vote(Component.Cpu, 1.5); }
         if (!double.IsNaN(gpuT) && gpuT >= 85 || !double.IsNaN(hot) && hot >= 100) { ex.Add($"GPU was very hot ({gpuT:0} °C core{(double.IsNaN(hot) ? "" : $", {hot:0} °C hot spot")})."); Vote(Component.Gpu, 1.5); }
         double totalP = (double.IsNaN(cpuP) ? 0 : cpuP) + (double.IsNaN(gpuP) ? 0 : gpuP);
         if (c.Kind == CrashKind.PowerLossOrHang && totalP > 350)

@@ -79,7 +79,10 @@ public sealed class PlanRunner
         double doneSeconds = 0;
         DateTime stepStart = start;
         TestStep? current = null;
-        int overTemp = 0, overGpuTemp = 0;
+        int overTemp = 0, overGpuTemp = 0, overHard = 0;
+        double? lastAc = null;
+        // Laptops are built to sit at their thermal limit: require the limit to be held longer before stopping.
+        int hold = _plan.Settings.LaptopRules ? 10 : 3;
 
         // Sensor sampling + progress + heartbeat loop (1 Hz).
         var samplerCts = new CancellationTokenSource();
@@ -111,8 +114,16 @@ public sealed class PlanRunner
                         if (key.TryGetValue(KeyMetrics.CpuTemp, out var ct) && ct >= _plan.Settings.CpuTempLimit) overTemp++; else overTemp = 0;
                         var gt = Math.Max(key.GetValueOrDefault(KeyMetrics.GpuTemp), 0);
                         if (gt >= _plan.Settings.GpuTempLimit) overGpuTemp++; else overGpuTemp = 0;
-                        if (overTemp >= 3) Abort($"Safety stop: CPU reached {ct:0} °C (limit {_plan.Settings.CpuTempLimit:0} °C)");
-                        if (overGpuTemp >= 3) Abort($"Safety stop: GPU reached {gt:0} °C (limit {_plan.Settings.GpuTempLimit:0} °C)");
+                        if (key.TryGetValue(KeyMetrics.CpuTemp, out var hard) && hard >= 105) overHard++; else overHard = 0;
+                        if (overTemp >= hold) Abort($"Safety stop: CPU reached {ct:0} °C (limit {_plan.Settings.CpuTempLimit:0} °C for {hold} s)");
+                        if (overGpuTemp >= hold) Abort($"Safety stop: GPU reached {gt:0} °C (limit {_plan.Settings.GpuTempLimit:0} °C for {hold} s)");
+                        if (overHard >= 3) Abort($"Safety stop: CPU reached {hard:0} °C — above any safe maximum");
+                    }
+                    if (key.TryGetValue(KeyMetrics.OnAc, out var ac))
+                    {
+                        if (lastAc == 1 && ac < 0.5) AddLog("Charger disconnected — the PC is now on battery and power-limited", Severity.Warning, journal);
+                        if (lastAc == 0 && ac >= 0.5) AddLog("Charger reconnected", Severity.Info, journal);
+                        lastAc = ac;
                     }
 
                     var cur = current;

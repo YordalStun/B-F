@@ -8,7 +8,17 @@
         <ScrollViewer Padding="0,0,18,0">
             <StackPanel>
                 <TextBlock Text="Run tests" Style="{StaticResource H1}" />
-                <TextBlock Text="Pick what to run. Every test is time-boxed, so you always know exactly how long is left — leave it running and come back." Style="{StaticResource MutedText}" Margin="0,2,0,16" />
+                <TextBlock Text="Pick what to run. Every test is time-boxed, so you always know exactly how long is left — leave it running and come back." Style="{StaticResource MutedText}" Margin="0,2,0,12" />
+                <Border Visibility="{Binding LaptopText, Converter={StaticResource Vis}}" Background="#263FA7FF" BorderBrush="{StaticResource Blue}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,14">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <TextBlock Text="Laptop mode" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <ComboBox Width="90" ItemsSource="{Binding LaptopModes}" SelectedItem="{Binding LaptopMode}" />
+                        </StackPanel>
+                        <TextBlock Text="&#xE7F8;" Style="{StaticResource Icon}" Foreground="{StaticResource Blue}" Margin="0,0,10,0" VerticalAlignment="Top" />
+                        <TextBlock Text="{Binding LaptopText}" TextWrapping="Wrap" />
+                    </DockPanel>
+                </Border>
 
                 <ItemsControl ItemsSource="{Binding Presets}">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><c:AdaptiveColumns MinItemWidth="290" MaxColumns="2" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>

@@ -64,6 +64,30 @@ public static class RecommendationEngine
             actions.Add("Make sure case fans are running and filters are clean");
             Add(Severity.Warning, cpu && !gpu ? Component.Cpu : gpu && !cpu ? Component.Gpu : null, "Improve cooling", "Parts reached temperatures where they slow down or become unstable.", actions.ToArray());
         }
+        bool laptop = r.Plan.Settings.LaptopRules || r.Hardware?.IsLaptop == true;
+        if (Has(x => x.Title.StartsWith("Cooling: Weak") || x.Title.StartsWith("Cooling: Poor")) || (laptop && Has(x => x.Title.Contains("below its base clock"))))
+        {
+            if (laptop)
+                Add(Has(x => x.Title.StartsWith("Cooling: Poor")) ? Severity.Critical : Severity.Warning, Component.Cpu, "Help the laptop cool down",
+                    "The laptop loses performance once it gets hot.",
+                    "Blow dust out of the vents and fans with compressed air (hold the fans still while you do)",
+                    "Use it on a hard, flat surface — not a bed, sofa or lap — and raise the back a little or use a laptop stand / cooling pad",
+                    "Select the maker's performance mode (Armoury Crate, Lenovo Vantage, Dell Power Manager, HP Command Center, MSI Center) and Windows power mode 'Best performance'",
+                    "Keep the original-wattage charger plugged in while gaming or testing",
+                    "Update the BIOS / EC firmware from the laptop maker's support site",
+                    "If the laptop is 2+ years old, a fresh thermal paste job often restores a lot of performance");
+            else
+                Add(Has(x => x.Title.StartsWith("Cooling: Poor")) ? Severity.Critical : Severity.Warning, Component.Cpu, "Improve CPU cooling",
+                    "The CPU loses speed under sustained load.",
+                    "Check the cooler is mounted firmly and the fan/pump runs", "Clean dust from heatsinks and filters", "Re-apply thermal paste if the PC is a few years old", "Improve case airflow");
+        }
+        if (Has(x => x.Title.Contains("ran on battery") || x.Title.Contains("Charger was disconnected")))
+            Add(Severity.Warning, null, "Test with the charger plugged in", "Laptops limit power on battery, so the results understate what this PC can do.",
+                "Plug in the original charger and run the test again", "If it was plugged in, check the cable, the charger's wattage and the laptop's power socket");
+        if (r.Hardware is { BatteryWearPercent: >= 50 })
+            Add(Severity.Warning, null, "Consider replacing the battery", $"The battery has lost {r.Hardware.BatteryWearPercent:0}% of its capacity.",
+                "Check the maker's battery health tool", "Replace the battery if run time is short or the laptop shuts down under load");
+
         if (Has(x => x.Title.Contains("CPU fan not detected")))
             Add(Severity.Critical, Component.Cpu, "Check the CPU fan", "The CPU fan reported 0 RPM while the CPU was hot.", "Check the fan cable is on the CPU_FAN header", "Make sure the fan/pump actually spins", "Enable fan-failure warning in BIOS");
         if (Has(x => x.Title.Contains("single-channel")))

@@ -100,6 +100,12 @@
                         <TextBox Width="80" Text="{Binding StorageFileMB, UpdateSourceTrigger=LostFocus}" />
                         <TextBlock Text="MB" VerticalAlignment="Center" Margin="6,0,0,0" />
                     </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                        <TextBlock Text="Laptop mode" Width="180" VerticalAlignment="Center" />
+                        <ComboBox Width="100" ItemsSource="{Binding LaptopModes}" SelectedItem="{Binding LaptopMode}" />
+                        <TextBlock Text="{Binding LaptopInfo}" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <TextBlock Text="Laptop mode treats running at the thermal limit as normal (raised safety limits held for 10 s) and judges how much performance the cooling keeps. Auto turns it on for laptops." Style="{StaticResource MutedText}" Margin="0,0,0,6" />
                     <CheckBox Content="Run the 3D test full screen (borderless — the overlay stays visible)" IsChecked="{Binding GpuFullscreen}" Margin="0,8,0,3" />
                     <CheckBox Content="Stop at the first calculation/memory error" IsChecked="{Binding StopOnError}" />
                     <CheckBox Content="Reopen BenchForge after a crash and show what went wrong" IsChecked="{Binding ReopenAfterCrash}" />

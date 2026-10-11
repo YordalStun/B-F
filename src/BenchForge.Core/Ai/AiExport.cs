@@ -154,6 +154,8 @@ public static class AiExport
                           (d.Volumes.Count > 0 ? $", {string.Join(" ", d.Volumes)}" : "") + (d.FreePercent != null ? $" ({d.FreePercent:0}% free)" : ""));
         sb.AppendLine($"- **Motherboard:** {hw.Motherboard}, BIOS {hw.BiosVersion} ({hw.BiosDate:yyyy-MM-dd})");
         sb.AppendLine($"- **Windows:** {hw.OsName} {hw.OsVersion}, last boot {hw.LastBoot:yyyy-MM-dd HH:mm}, power plan \"{hw.PowerPlan}\"");
+        if (hw.IsLaptop || hw.HasBattery)
+            sb.AppendLine($"- **Laptop:** {(hw.IsLaptop ? "yes" : "no")} ({hw.ChassisType}); battery {(hw.HasBattery ? $"{(hw.BatteryWearPercent is double w ? $"health {100 - w:0}% ({hw.BatteryFullChargeWh:0.#} of {hw.BatteryDesignCapacityWh:0.#} Wh)" : "present")}" : "none")}; charger {(hw.OnBattery switch { true => "NOT connected", false => "connected", _ => "unknown" })}");
         sb.AppendLine($"- **Settings:** crash dumps {DumpText(hw.CrashDumpSetting)}, Fast Startup {(hw.FastStartupEnabled is bool f ? (f ? "on" : "off") : "unknown")}, GPU TDR delay {(hw.TdrDelaySeconds is int t ? t + " s" : "default (2 s)")}");
         foreach (var n in hw.Notes) sb.AppendLine($"- Note: {n}");
         return sb.AppendLine().ToString();
@@ -174,7 +176,7 @@ public static class AiExport
         if (r.OverallScore != null || r.ComponentScores.Count > 0)
             sb.AppendLine($"- Scores: overall {r.OverallScore?.ToString("0") ?? "n/a"}; " + string.Join(", ", r.ComponentScores.Select(kv => $"{kv.Key.Display()} {kv.Value:0}")));
         var settings = r.Plan.Settings;
-        sb.AppendLine($"- Plan: {string.Join(" → ", r.Plan.Steps.Take(12).Select(s => $"{s.Name} ({TimeFormat.Short(TimeSpan.FromSeconds(s.DurationSeconds))})"))}{(r.Plan.Steps.Count > 12 ? " …" : "")}; CPU stress mode {settings.CpuStressMode}, safety limits CPU {settings.CpuTempLimit:0} °C / GPU {settings.GpuTempLimit:0} °C");
+        sb.AppendLine($"- Plan: {string.Join(" → ", r.Plan.Steps.Take(12).Select(s => $"{s.Name} ({TimeFormat.Short(TimeSpan.FromSeconds(s.DurationSeconds))})"))}{(r.Plan.Steps.Count > 12 ? " …" : "")}; {(settings.LaptopRules ? "LAPTOP rules (CPU at its thermal limit is normal), " : "")}CPU stress mode {settings.CpuStressMode}, safety limits CPU {settings.CpuTempLimit:0} °C / GPU {settings.GpuTempLimit:0} °C");
         sb.AppendLine();
 
         if (r.Crash is CrashInfo c) sb.Append(CrashText(c, "### What happened (crash)"));

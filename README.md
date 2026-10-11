@@ -16,6 +16,7 @@ Windows hardware benchmark, stress test and crash-diagnosis tool. One portable `
 | **Event Viewer** | Type “all bluescreens” or “gpu crashes last week”, or click a category. |
 | **Export for AI** | One click saves a single `.md` file with everything — tests, scores, every sensor (min/avg/max + history CSV), crash details with the last seconds of sensor data, Windows crash/WHEA/GPU/disk events, Reliability Monitor, drivers, system info, BenchForge's own analysis. Upload it to Claude.ai or any AI — no API key needed. Optional `.zip` bundle adds full-resolution sensor CSVs and the original result files. |
 | **Fixes** | One-click software fixes (system file repair, chkdsk, memory diagnostic, power plan, Fast Startup, crash dumps, GPU timeout, temp cleanup) — always asks first. |
+| **Laptop mode** | Auto-detects laptops: running at the thermal limit is treated as normal (safety limits 100 °C / 95 °C held for 10 s, hard stop at 105 °C); instead BenchForge scores the **cooling** — how much performance the CPU keeps under sustained load. Warns when on battery or if the charger is pulled mid-test, and reports battery health. |
 | **Small screens** | Works on laptops: icon-only sidebar below ~1150 px, panels stack on narrow windows, pages scroll instead of squashing. |
 | **AI (optional)** | Built-in analysis always works offline. Optionally: a local AI model (downloads on selection, runs offline), Claude with your API key, or your own Ollama/LM Studio server. Results files (`.bfresult`) can be taken to another PC to analyse there. |
 

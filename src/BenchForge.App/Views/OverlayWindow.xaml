@@ -4,7 +4,15 @@
         Title="BenchForge overlay" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" SizeToContent="WidthAndHeight" ShowActivated="False"
         FontFamily="{StaticResource MonoFont}">
-    <Border Background="#D90F1317" BorderBrush="#66FF7A3D" BorderThickness="1" CornerRadius="8" Padding="12,9" Cursor="SizeAll">
+    <Border Background="#D90F1317" BorderThickness="1" CornerRadius="8" Padding="12,9" Cursor="SizeAll">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderBrush" Value="#66FF7A3D" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding OnBattery}" Value="True"><Setter Property="BorderBrush" Value="{StaticResource Warn}" /></DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
         <StackPanel>
             <DockPanel>
                 <TextBlock DockPanel.Dock="Right" Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{StaticResource Muted}" Cursor="Hand" Margin="10,2,0,0" MouseLeftButtonUp="Close_Click" ToolTip="Hide overlay" />

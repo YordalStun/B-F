@@ -54,6 +54,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
         _burnRam = s.BurnComponents.Contains(Component.Memory); _burnDisk = s.BurnComponents.Contains(Component.Storage);
         var t = s.Test;
         _cpuStressMode = t.CpuStressMode; _memoryPercent = t.MemoryPercent; _gpuFullscreen = t.GpuFullscreen;
+        _laptopMode = t.LaptopMode;
         _cpuTempLimit = t.CpuTempLimit; _gpuTempLimit = t.GpuTempLimit; _stopOnError = t.StopOnError; _reopenAfterCrash = t.ReopenAfterCrash; _storageFileMB = t.StorageFileMB;
         foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
             Drives.Add(d.Name);
@@ -101,6 +102,31 @@ public sealed partial class RunSetupViewModel : PageViewModel
     [ObservableProperty] private bool _stopOnError;
     [ObservableProperty] private bool _reopenAfterCrash;
     [ObservableProperty] private bool _showOverlay = true;
+    public LaptopMode[] LaptopModes { get; } = Enum.GetValues<LaptopMode>();
+    [ObservableProperty] private LaptopMode _laptopMode;
+    [ObservableProperty] private bool _laptopDetected;
+    [ObservableProperty] private string? _laptopText;
+    public bool LaptopRules => LaptopMode == LaptopMode.On || (LaptopMode == LaptopMode.Auto && LaptopDetected);
+
+    /// <summary>Called when the hardware inventory is ready.</summary>
+    public void OnInventory(HardwareInventory inv)
+    {
+        LaptopDetected = inv.IsLaptop;
+        UpdateLaptopText();
+        // Laptops sit at their thermal limit by design: raise the default safety limits (only if still at desktop defaults).
+        if (LaptopRules && CpuTempLimit == 95 && GpuTempLimit == 90) { CpuTempLimit = 100; GpuTempLimit = 95; }
+    }
+
+    partial void OnLaptopModeChanged(LaptopMode value)
+    {
+        UpdateLaptopText();
+        if (LaptopRules && CpuTempLimit == 95 && GpuTempLimit == 90) { CpuTempLimit = 100; GpuTempLimit = 95; }
+        else if (!LaptopRules && CpuTempLimit == 100 && GpuTempLimit == 95) { CpuTempLimit = 95; GpuTempLimit = 90; }
+    }
+
+    private void UpdateLaptopText() => LaptopText = LaptopRules
+        ? (LaptopDetected ? "Laptop detected — laptop mode is on." : "Laptop mode is on.") + " Running at the thermal limit is treated as normal; BenchForge judges how much performance the cooling keeps instead. Keep the charger plugged in."
+        : LaptopDetected ? "Laptop detected, but laptop mode is off — hot-but-normal temperatures will be flagged as problems." : null;
 
     // Preview
     public ObservableCollection<StepPreview> Preview { get; } = new();
@@ -123,6 +149,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
     {
         CpuStressMode = CpuStressMode, MemoryPercent = MemoryPercent, StorageTarget = StorageTarget, StorageFileMB = StorageFileMB,
         GpuFullscreen = GpuFullscreen, CpuTempLimit = CpuTempLimit, GpuTempLimit = GpuTempLimit, StopOnError = StopOnError, ReopenAfterCrash = ReopenAfterCrash,
+        LaptopMode = LaptopMode, LaptopRules = LaptopRules,
     };
 
     private TimeSpan Duration => TimeSpan.FromHours(Math.Max(0, Hours)) + TimeSpan.FromMinutes(Math.Max(0, Minutes));
@@ -228,6 +255,11 @@ public sealed partial class RunSetupViewModel : PageViewModel
     {
         var plan = BuildPlan();
         if (plan == null) return;
+        var (onAc, hasBattery, pct) = Core.Platform.PowerStatus.Get();
+        if (hasBattery && onAc == false &&
+            System.Windows.MessageBox.Show($"This PC is running on battery ({pct}%).\n\nOn battery, laptops limit power, so scores and stress tests will be lower and a long test may drain the battery.\n\nPlug in the charger for accurate results. Start anyway?",
+                "Charger not connected", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
+            return;
         // Remember choices.
         var st = Main.S.Settings;
         st.Test = plan.Settings;

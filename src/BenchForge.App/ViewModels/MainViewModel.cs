@@ -84,6 +84,7 @@ public sealed partial class MainViewModel : ObservableObject
         {
             Dashboard.SetInventory(S.Inventory!);
             Dashboard.LoadSystemChecks(S.Inventory!);
+            Run.OnInventory(S.Inventory!);
             AdminText = S.Inventory!.IsAdmin ? "Administrator" : "Not administrator — some sensors/logs unavailable";
         });
         S.Start();

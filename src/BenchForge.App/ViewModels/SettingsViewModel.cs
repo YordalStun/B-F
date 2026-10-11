@@ -45,7 +45,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         _hasKey = !string.IsNullOrEmpty(Secrets.Unprotect(s.EncryptedApiKey));
         var t = s.Test;
         _cpuTempLimit = t.CpuTempLimit; _gpuTempLimit = t.GpuTempLimit; _stopOnError = t.StopOnError; _memoryPercent = t.MemoryPercent;
-        _storageFileMB = t.StorageFileMB; _gpuFullscreen = t.GpuFullscreen; _reopenAfterCrash = t.ReopenAfterCrash;
+        _storageFileMB = t.StorageFileMB; _gpuFullscreen = t.GpuFullscreen; _reopenAfterCrash = t.ReopenAfterCrash; _laptopMode = t.LaptopMode;
         _init = false;
     }
 
@@ -69,6 +69,13 @@ public sealed partial class SettingsViewModel : PageViewModel
     [ObservableProperty] private int _storageFileMB;
     [ObservableProperty] private bool _gpuFullscreen;
     [ObservableProperty] private bool _reopenAfterCrash;
+    public LaptopMode[] LaptopModes { get; } = Enum.GetValues<LaptopMode>();
+    [ObservableProperty] private LaptopMode _laptopMode;
+    partial void OnLaptopModeChanged(LaptopMode value) { Save(); Main.Run.LaptopMode = value; }
+    public string LaptopInfo => Main.S.Inventory is { } inv
+        ? (inv.IsLaptop ? $"This PC is a laptop ({inv.ChassisType})" : $"This PC is not a laptop ({(inv.ChassisType.Length > 0 ? inv.ChassisType : "desktop")})") +
+          (inv.BatteryWearPercent is double w ? $" · battery health {100 - w:0}%" : "")
+        : "Detecting…";
 
     public bool IsLocal => Provider.Kind == AiProviderKind.LocalModel;
     public bool IsClaude => Provider.Kind == AiProviderKind.Claude;
@@ -112,7 +119,7 @@ public sealed partial class SettingsViewModel : PageViewModel
         s.Ai.CustomServerUrl = ServerUrl;
         s.Ai.CustomServerModel = ServerModel;
         s.Test.CpuTempLimit = CpuTempLimit; s.Test.GpuTempLimit = GpuTempLimit; s.Test.StopOnError = StopOnError;
-        s.Test.MemoryPercent = MemoryPercent; s.Test.StorageFileMB = StorageFileMB; s.Test.GpuFullscreen = GpuFullscreen; s.Test.ReopenAfterCrash = ReopenAfterCrash;
+        s.Test.MemoryPercent = MemoryPercent; s.Test.StorageFileMB = StorageFileMB; s.Test.GpuFullscreen = GpuFullscreen; s.Test.ReopenAfterCrash = ReopenAfterCrash; s.Test.LaptopMode = LaptopMode;
         Main.S.SaveSettings();
     }
 

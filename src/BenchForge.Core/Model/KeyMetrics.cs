@@ -27,6 +27,10 @@ public static class KeyMetrics
     public const string BoardTemp = "board.temp";
     public const string CpuFan = "fan.cpu";
     public const string Rail12V = "psu.12v";
+    /// <summary>1 = charger connected, 0 = on battery.</summary>
+    public const string OnAc = "psu.ac";
+    public const string BatteryLevel = "battery.level";
+    public const string AcReadingId = "/power/ac";
 
     public static readonly (string Id, string Label, string Unit)[] All =
     {
@@ -51,6 +55,8 @@ public static class KeyMetrics
         (BoardTemp, "Motherboard temperature", "°C"),
         (CpuFan, "CPU fan", "RPM"),
         (Rail12V, "+12V rail", "V"),
+        (OnAc, "Charger", ""),
+        (BatteryLevel, "Battery", "%"),
     };
 
     public static string Label(string id) => All.FirstOrDefault(a => a.Id == id).Label ?? id;
@@ -63,7 +69,7 @@ public static class KeyMetrics
 
     public static HwType HwTypeOf(string key) => key.Split('.')[0] switch
     {
-        "cpu" => HwType.Cpu, "gpu" => HwType.Gpu, "ram" => HwType.Memory, "disk" => HwType.Storage, "board" or "fan" => HwType.Motherboard, "psu" => HwType.Psu, _ => HwType.Other,
+        "cpu" => HwType.Cpu, "gpu" => HwType.Gpu, "ram" => HwType.Memory, "disk" => HwType.Storage, "board" or "fan" => HwType.Motherboard, "psu" or "battery" => HwType.Psu, _ => HwType.Other,
     };
 
     public static SensorKind KindOf(string key) => key switch
@@ -73,6 +79,8 @@ public static class KeyMetrics
         _ when key.EndsWith("clock") => SensorKind.Clock,
         _ when key.EndsWith("power") => SensorKind.Power,
         _ when key.EndsWith("vcore") || key.EndsWith("12v") => SensorKind.Voltage,
+        _ when key == OnAc => SensorKind.Other,
+        _ when key == BatteryLevel => SensorKind.Level,
         _ when key.EndsWith("fan") || key.StartsWith("fan.") => SensorKind.Fan,
         _ => SensorKind.Data,
     };
@@ -125,6 +133,9 @@ public static class KeyMetrics
         Set(d, BoardTemp, Pick(board, SensorKind.Temperature, "System", "Motherboard", "Temperature #1"));
         Set(d, CpuFan, Pick(board, SensorKind.Fan, "CPU Fan", "CPU", "Fan #1", "Fan #2"));
         Set(d, Rail12V, Pick(board, SensorKind.Voltage, "+12V", "12V"));
+        Set(d, OnAc, readings.FirstOrDefault(r => r.Id == AcReadingId)?.Value);
+        Set(d, BatteryLevel, readings.Where(r => r.Kind == SensorKind.Level && r.Name.Contains("Charge Level", StringComparison.OrdinalIgnoreCase)).Select(r => (double?)r.Value).FirstOrDefault()
+                             ?? readings.FirstOrDefault(r => r.Id == "/power/battery")?.Value);
         return d;
     }
 

@@ -128,6 +128,39 @@ public static class WmiInventory
             int a = output.LastIndexOf('('), b = output.LastIndexOf(')');
             inv.PowerPlan = a >= 0 && b > a ? output[(a + 1)..b] : output.Trim();
         });
+        Try(inv, "Laptop / battery", () =>
+        {
+            int[] portable = { 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 };
+            foreach (var o in Query("SELECT ChassisTypes FROM Win32_SystemEnclosure"))
+                if (o["ChassisTypes"] is ushort[] types && types.Length > 0)
+                {
+                    inv.ChassisType = types[0] switch
+                    {
+                        3 => "Desktop", 4 => "Low-profile desktop", 6 => "Mini tower", 7 => "Tower", 8 => "Portable", 9 => "Laptop", 10 => "Notebook",
+                        13 => "All-in-one", 14 => "Sub-notebook", 30 => "Tablet", 31 => "Convertible", 32 => "Detachable", 35 => "Mini PC", _ => $"Type {types[0]}",
+                    };
+                    if (types.Any(t => portable.Contains(t))) inv.IsLaptop = true;
+                }
+            var (onAc, hasBattery, _) = Core.Platform.PowerStatus.Get();
+            inv.HasBattery = hasBattery || Query("SELECT Name FROM Win32_Battery").Count > 0;
+            if (inv.HasBattery && inv.ChassisType is not ("Desktop" or "Tower" or "Mini tower" or "All-in-one" or "Low-profile desktop")) inv.IsLaptop = true;
+            inv.OnBattery = onAc is bool a ? !a : null;
+            if (inv.HasBattery)
+            {
+                try
+                {
+                    double design = Query("SELECT DesignedCapacity FROM BatteryStaticData", @"root\WMI").Select(o => Convert.ToDouble(o["DesignedCapacity"])).FirstOrDefault();
+                    double full = Query("SELECT FullChargedCapacity FROM BatteryFullChargedCapacity", @"root\WMI").Select(o => Convert.ToDouble(o["FullChargedCapacity"])).FirstOrDefault();
+                    if (design > 0 && full > 0)
+                    {
+                        inv.BatteryDesignCapacityWh = Math.Round(design / 1000, 1);
+                        inv.BatteryFullChargeWh = Math.Round(full / 1000, 1);
+                        inv.BatteryWearPercent = Math.Round(Math.Clamp(100 - 100 * full / design, 0, 100), 1);
+                    }
+                }
+                catch { }
+            }
+        });
         Try(inv, "Windows settings", () =>
         {
             using var cc = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\CrashControl");

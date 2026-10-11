@@ -499,3 +499,75 @@ public class AiExportEverythingTests
         Assert.Equal("1,51.5,99", csv[2].Trim());
     }
 }
+
+public class LaptopModeTests
+{
+    private static RunResult HotRun(bool laptop, double cpuMax)
+    {
+        var r = new RunResult { Status = RunStatus.Completed, StartTime = DateTime.Now };
+        r.Plan.Settings.LaptopRules = laptop;
+        r.KeyStats[KeyMetrics.CpuTemp] = new ChannelStats { Max = cpuMax };
+        return r;
+    }
+
+    [Fact]
+    public void Ninety_eight_degrees_is_normal_on_a_laptop_but_critical_on_a_desktop()
+    {
+        var laptop = HotRun(true, 98); RunAnalyzer.Analyze(laptop);
+        var desktop = HotRun(false, 98); RunAnalyzer.Analyze(desktop);
+        Assert.DoesNotContain(laptop.Findings, f => f.Severity == Severity.Critical);
+        Assert.Contains(laptop.Findings, f => f.Title.Contains("normal for laptops"));
+        Assert.Contains(desktop.Findings, f => f.Severity == Severity.Critical && f.Title.Contains("overheating"));
+        Assert.DoesNotContain(laptop.Recommendations, r => r.Title == "Improve cooling");
+    }
+
+    [Fact]
+    public void Above_105_is_critical_even_on_a_laptop()
+    {
+        var r = HotRun(true, 106); RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Critical);
+    }
+
+    [Theory]
+    [InlineData(0.95, "Excellent", Severity.Info)]
+    [InlineData(0.85, "Good (typical laptop)", Severity.Info)]
+    [InlineData(0.70, "Weak — cooling is struggling", Severity.Warning)]
+    [InlineData(0.50, "Poor — heavy thermal throttling", Severity.Critical)]
+    public void Cooling_bands(double ratio, string verdict, Severity sev)
+    {
+        var (s, v, _) = RunAnalyzer.CoolingVerdict(ratio, laptop: true);
+        Assert.Equal(verdict, v);
+        Assert.Equal(sev, s);
+    }
+
+    [Fact]
+    public void Cooling_score_from_stress_throughput_drives_laptop_advice()
+    {
+        var start = DateTime.Now.AddMinutes(-5);
+        var r = new RunResult { Status = RunStatus.Completed, StartTime = start };
+        r.Plan.Settings.LaptopRules = true;
+        r.Hardware = new HardwareInventory { IsLaptop = true };
+        var step = new StepResult { Kind = StepKind.Stress, Components = { Component.Cpu }, Start = start, End = start.AddSeconds(240), Modules = { new ModuleResult { Component = Component.Cpu, Kind = StepKind.Stress } } };
+        r.Steps.Add(step);
+        r.Timeline.Channels.Add(new SensorChannel { Id = "test/cpu.stress", HwType = HwType.Test, Name = "CPU stress throughput" });
+        for (int t = 0; t < 240; t++) r.Timeline.Samples.Add(new TimelineSample { T = t, V = new float?[] { t < 20 ? 1000 : 600 } });
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title.StartsWith("Cooling: Poor"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Help the laptop cool down");
+        Assert.Contains(step.Modules[0].SubScores, s => s.Name.StartsWith("Sustained performance") && s.Value == 60);
+    }
+
+    [Fact]
+    public void Charger_and_battery_findings()
+    {
+        var r = new RunResult { Status = RunStatus.Completed, StartTime = DateTime.Now, Hardware = new HardwareInventory { IsLaptop = true, BatteryWearPercent = 55, BatteryDesignCapacityWh = 80, BatteryFullChargeWh = 36 } };
+        r.Plan.Settings.LaptopRules = true;
+        r.Timeline.Channels.Add(new SensorChannel { Id = KeyMetrics.ChannelId(KeyMetrics.OnAc) });
+        for (int t = 0; t < 100; t++) r.Timeline.Samples.Add(new TimelineSample { T = t, V = new float?[] { t < 50 ? 1 : 0 } });
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title.StartsWith("Charger was disconnected"));
+        Assert.Contains(r.Findings, f => f.Title.Contains("45% of its original charge"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Test with the charger plugged in");
+        Assert.Contains(r.Recommendations, x => x.Title == "Consider replacing the battery");
+    }
+}
