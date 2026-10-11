@@ -10,6 +10,23 @@ public sealed class WindowsEventSource : IEventSource
 {
     public List<EventEntry> Query(EventQuerySpec spec, int max = 500)
     {
+        // Windows rejects long XPath filters, so big queries run as one small query per selector and are merged.
+        if (spec.Selectors.Count > 3)
+        {
+            var merged = new Dictionary<(string, int, DateTime, string), EventEntry>();
+            foreach (var sel in spec.Selectors)
+            {
+                var sub = new EventQuerySpec { Selectors = { sel }, Levels = spec.Levels, Since = spec.Since, Until = spec.Until, Text = spec.Text };
+                foreach (var e in QuerySimple(sub, max))
+                    merged.TryAdd((e.Provider, e.Id, e.Time, e.Log), e);
+            }
+            return merged.Values.OrderByDescending(e => e.Time).Take(max).ToList();
+        }
+        return QuerySimple(spec, max);
+    }
+
+    private static List<EventEntry> QuerySimple(EventQuerySpec spec, int max)
+    {
         var all = new List<EventEntry>();
         foreach (var log in spec.AllLogs)
         {

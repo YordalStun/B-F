@@ -46,6 +46,7 @@ public static class GpuProgram
             API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(4, 3)),
         };
 
+        PreloadGlfw();
         IWindow window;
         try
         {
@@ -220,6 +221,24 @@ public static class GpuProgram
             try { window.Dispose(); } catch { }
         }
         return exitCode;
+    }
+
+    /// <summary>
+    /// In the single-file exe, native DLLs are unpacked to a temp folder. Load GLFW from there up front so the
+    /// windowing library always finds it (a loaded module is reused by name).
+    /// </summary>
+    private static void PreloadGlfw()
+    {
+        var name = OperatingSystem.IsWindows() ? "glfw3.dll" : "libglfw.so.3";
+        var dirs = new List<string> { AppContext.BaseDirectory };
+        if (AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES") is string extra)
+            dirs.AddRange(extra.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
+        dirs.Add(Path.Combine(AppContext.BaseDirectory, "runtimes", OperatingSystem.IsWindows() ? "win-x64" : "linux-x64", "native"));
+        foreach (var d in dirs)
+        {
+            var p = Path.Combine(d, name);
+            if (File.Exists(p) && System.Runtime.InteropServices.NativeLibrary.TryLoad(p, out _)) return;
+        }
     }
 
     private static void RunVram(GL gl, VramChecker vram)

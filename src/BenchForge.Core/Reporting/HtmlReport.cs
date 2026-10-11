@@ -161,10 +161,12 @@ public static class HtmlReport
         {
             sb.Append($"<tr><td>{E(row.Group)} · {E(row.Name)}</td>");
             double? first = row.Values.FirstOrDefault(v => v != null);
-            foreach (var v in row.Values)
+            int firstIndex = Array.FindIndex(row.Values, x => x != null);
+            for (int vi = 0; vi < row.Values.Length; vi++)
             {
+                var v = row.Values[vi];
                 string delta = "";
-                if (v is double x && first is double f0 && f0 != 0 && !ReferenceEquals(v, first))
+                if (v is double x && first is double f0 && f0 != 0 && vi != firstIndex)
                 {
                     double pct = (x / f0 - 1) * 100;
                     bool better = row.HigherIsBetter ? pct > 0 : pct < 0;
