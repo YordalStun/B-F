@@ -44,16 +44,16 @@ public sealed class SieveKernel : CpuKernel
     private const int Limit = 1_000_000;
     public override string Name => "Integer (prime sieve)";
     public override string Unit => "M numbers/s";
-    public override double WorkPerUnit => Limit / 1e6;
+    public override double WorkPerUnit => (Limit + 31.5 * 997) / 1e6;
     public override bool IsInteger => true;
     public override bool IsHeavyVector => false;
-    public override object CreateState() => new byte[Limit + 64];
+    public override object CreateState() => new byte[Limit + 64 * 997 + 1];
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public override ulong RunUnit(object state, int seed)
     {
         var composite = (byte[])state;
-        int n = Limit + (seed & 63);
+        int n = Limit + (seed & 63) * 997;
         Array.Clear(composite, 0, n + 1);
         for (long i = 2; i * i <= n; i++)
             if (composite[i] == 0)
@@ -120,10 +120,10 @@ public sealed class NBodyKernel : CpuKernel
 /// <summary>Single-precision matrix multiply with fused multiply-add on the widest vectors the CPU supports (AVX2/AVX-512). Hottest workload.</summary>
 public sealed class MatrixFmaKernel : CpuKernel
 {
-    private const int N = 128;
+    private const int N = 128, Repeats = 4;
     public override string Name => "Vector FMA (matrix)";
     public override string Unit => "GFLOP/s";
-    public override double WorkPerUnit => 2.0 * N * N * N / 1e9;
+    public override double WorkPerUnit => 2.0 * N * N * N * Repeats / 1e9;
     public override bool IsInteger => false;
     public override bool IsHeavyVector => true;
 
@@ -131,7 +131,7 @@ public sealed class MatrixFmaKernel : CpuKernel
     public override object CreateState() => new State();
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    public override ulong RunUnit(object state, int seed)
+    public override unsafe ulong RunUnit(object state, int seed)
     {
         var st = (State)state;
         ulong s = 0x9E3779B97F4A7C15UL * (ulong)(seed + 7);
@@ -142,24 +142,64 @@ public sealed class MatrixFmaKernel : CpuKernel
             st.C[i] = 0;
         }
         int w = Vector<float>.Count;
-        var a = st.A; var bm = st.B; var c = st.C;
-        for (int i = 0; i < N; i++)
+        // Register-blocked kernel: 4 rows × 2 vectors of C stay in registers, 8 FMAs per 2 loads.
+        // This keeps the FMA units saturated — the hottest, highest-power workload in BenchForge.
+        fixed (float* a = st.A, bm = st.B, c = st.C)
         {
-            var cRow = c.AsSpan(i * N, N);
-            for (int k = 0; k < N; k++)
+            for (int i = 0; i < N; i += 4)
             {
-                var aik = new Vector<float>(a[i * N + k]);
-                var bRow = bm.AsSpan(k * N, N);
-                for (int j = 0; j < N; j += w)
+                for (int j = 0; j < N; j += 2 * w)
                 {
-                    var cv = new Vector<float>(cRow.Slice(j));
-                    var bv = new Vector<float>(bRow.Slice(j));
-                    Vector.FusedMultiplyAdd(aik, bv, cv).CopyTo(cRow.Slice(j));
+                    Vector<float> c00 = default, c01 = default, c10 = default, c11 = default, c20 = default, c21 = default, c30 = default, c31 = default;
+                    for (int k = 0; k < N; k++)
+                    {
+                        var b0 = Unsafe.ReadUnaligned<Vector<float>>(bm + k * N + j);
+                        var b1 = Unsafe.ReadUnaligned<Vector<float>>(bm + k * N + j + w);
+                        var a0 = new Vector<float>(a[i * N + k]);
+                        var a1 = new Vector<float>(a[(i + 1) * N + k]);
+                        var a2 = new Vector<float>(a[(i + 2) * N + k]);
+                        var a3 = new Vector<float>(a[(i + 3) * N + k]);
+                        c00 = Vector.FusedMultiplyAdd(a0, b0, c00); c01 = Vector.FusedMultiplyAdd(a0, b1, c01);
+                        c10 = Vector.FusedMultiplyAdd(a1, b0, c10); c11 = Vector.FusedMultiplyAdd(a1, b1, c11);
+                        c20 = Vector.FusedMultiplyAdd(a2, b0, c20); c21 = Vector.FusedMultiplyAdd(a2, b1, c21);
+                        c30 = Vector.FusedMultiplyAdd(a3, b0, c30); c31 = Vector.FusedMultiplyAdd(a3, b1, c31);
+                    }
+                    Unsafe.WriteUnaligned(c + i * N + j, c00); Unsafe.WriteUnaligned(c + i * N + j + w, c01);
+                    Unsafe.WriteUnaligned(c + (i + 1) * N + j, c10); Unsafe.WriteUnaligned(c + (i + 1) * N + j + w, c11);
+                    Unsafe.WriteUnaligned(c + (i + 2) * N + j, c20); Unsafe.WriteUnaligned(c + (i + 2) * N + j + w, c21);
+                    Unsafe.WriteUnaligned(c + (i + 3) * N + j, c30); Unsafe.WriteUnaligned(c + (i + 3) * N + j + w, c31);
                 }
             }
+            // Repeat the multiply a few times on the same data so FMA work dominates the set-up cost.
+            for (int rep = 0; rep < Repeats - 1; rep++)
+                for (int i = 0; i < N; i += 4)
+                    for (int j = 0; j < N; j += 2 * w)
+                    {
+                        Vector<float> c00 = Unsafe.ReadUnaligned<Vector<float>>(c + i * N + j), c01 = Unsafe.ReadUnaligned<Vector<float>>(c + i * N + j + w);
+                        Vector<float> c10 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 1) * N + j), c11 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 1) * N + j + w);
+                        Vector<float> c20 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 2) * N + j), c21 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 2) * N + j + w);
+                        Vector<float> c30 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 3) * N + j), c31 = Unsafe.ReadUnaligned<Vector<float>>(c + (i + 3) * N + j + w);
+                        for (int k = 0; k < N; k++)
+                        {
+                            var b0 = Unsafe.ReadUnaligned<Vector<float>>(bm + k * N + j);
+                            var b1 = Unsafe.ReadUnaligned<Vector<float>>(bm + k * N + j + w);
+                            var a0 = new Vector<float>(a[i * N + k]);
+                            var a1 = new Vector<float>(a[(i + 1) * N + k]);
+                            var a2 = new Vector<float>(a[(i + 2) * N + k]);
+                            var a3 = new Vector<float>(a[(i + 3) * N + k]);
+                            c00 = Vector.FusedMultiplyAdd(a0, b0, c00); c01 = Vector.FusedMultiplyAdd(a0, b1, c01);
+                            c10 = Vector.FusedMultiplyAdd(a1, b0, c10); c11 = Vector.FusedMultiplyAdd(a1, b1, c11);
+                            c20 = Vector.FusedMultiplyAdd(a2, b0, c20); c21 = Vector.FusedMultiplyAdd(a2, b1, c21);
+                            c30 = Vector.FusedMultiplyAdd(a3, b0, c30); c31 = Vector.FusedMultiplyAdd(a3, b1, c31);
+                        }
+                        Unsafe.WriteUnaligned(c + i * N + j, c00); Unsafe.WriteUnaligned(c + i * N + j + w, c01);
+                        Unsafe.WriteUnaligned(c + (i + 1) * N + j, c10); Unsafe.WriteUnaligned(c + (i + 1) * N + j + w, c11);
+                        Unsafe.WriteUnaligned(c + (i + 2) * N + j, c20); Unsafe.WriteUnaligned(c + (i + 2) * N + j + w, c21);
+                        Unsafe.WriteUnaligned(c + (i + 3) * N + j, c30); Unsafe.WriteUnaligned(c + (i + 3) * N + j + w, c31);
+                    }
         }
         ulong h = 0x84222325CBF29CE4UL;
-        for (int i = 0; i < N * N; i += 7) h = Mix(h, BitConverter.SingleToUInt32Bits(c[i]));
+        for (int i = 0; i < N * N; i += 7) h = Mix(h, BitConverter.SingleToUInt32Bits(st.C[i]));
         return h;
     }
 }

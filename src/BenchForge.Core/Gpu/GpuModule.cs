@@ -20,6 +20,9 @@ public sealed class GpuModule : ITestModule
 
     public static ProcessStartInfo DefaultLaunch(string args)
     {
+        var overridePath = Environment.GetEnvironmentVariable("BENCHFORGE_GPU_WORKER");
+        if (!string.IsNullOrEmpty(overridePath))
+            return overridePath.EndsWith(".dll") ? new ProcessStartInfo("dotnet", $"\"{overridePath}\" {args}") : new ProcessStartInfo(overridePath, args);
         var baseDir = AppContext.BaseDirectory;
         var exe = Path.Combine(baseDir, OperatingSystem.IsWindows() ? "BenchForge.Gpu.exe" : "BenchForge.Gpu");
         if (File.Exists(exe)) return new ProcessStartInfo(exe, args);

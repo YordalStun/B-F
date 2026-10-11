@@ -221,6 +221,9 @@ public static class CrashAnalyzer
         if (c.Signals.Any(s => s.Kind == SignalKind.ThermalThrottle)) ex.Add("Windows logged CPU throttling by firmware (heat or power limit).");
         if (c.ErrorsBeforeCrash > 0) ex.Add($"BenchForge had already found {c.ErrorsBeforeCrash} calculation/memory errors before the crash — the hardware was producing wrong results.");
 
+        // When only BenchForge stopped (no reboot, no hardware signals) the load at the time says nothing about the hardware.
+        if (c.Kind == CrashKind.AppTerminated && !c.Signals.Any(s => s.Kind is SignalKind.WheaFatal or SignalKind.GpuDriverReset) && c.ErrorsBeforeCrash == 0)
+            votes.Clear();
         if (votes.Count > 0)
         {
             var top = votes.OrderByDescending(v => v.Value).First();

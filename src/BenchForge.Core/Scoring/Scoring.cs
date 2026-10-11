@@ -35,12 +35,13 @@ public static class ScoreReferences
     // CPU (per kernel, units match CpuKernel.Unit). Single-thread reference values.
     public static readonly Dictionary<string, double> CpuSingle = new()
     {
-        ["Integer (prime sieve)"] = 430,        // M numbers/s
-        ["Floating point (n-body)"] = 290,     // M interactions/s
-        ["Vector FMA (matrix)"] = 26,          // GFLOP/s
-        ["Crypto (AES-GCM + SHA-256)"] = 1050,  // MB/s
-        ["Compression (Brotli)"] = 62,         // MB/s
-        ["Sorting"] = 70,                      // M elements/s
+        // Calibrated so a 2.8 GHz Xeon (cloud) core scores ~600, i.e. 1000 ≈ a current ~5 GHz desktop core.
+        ["Integer (prime sieve)"] = 490,       // M numbers/s
+        ["Floating point (n-body)"] = 160,     // M interactions/s
+        ["Vector FMA (matrix)"] = 43,          // GFLOP/s
+        ["Crypto (AES-GCM + SHA-256)"] = 1050, // MB/s
+        ["Compression (Brotli)"] = 80,         // MB/s
+        ["Sorting"] = 20,                      // M elements/s
     };
 
     /// <summary>Multi-thread reference = single-thread reference × this factor (8 threads with SMT ≈ 5.5 cores of work).</summary>
@@ -49,7 +50,7 @@ public static class ScoreReferences
     // RAM
     public const double MemReadMBs = 32000;
     public const double MemWriteMBs = 22000;
-    public const double MemCopyMBs = 20000;
+    public const double MemCopyMBs = 36000;  // read + write traffic
     public const double MemLatencyNs = 85;   // lower is better
 
     // Storage (MB/s)
@@ -60,12 +61,13 @@ public static class ScoreReferences
     public const double Disk4kReadMT = 320;
     public const double Disk4kWriteMT = 260;
 
-    // GPU: work units per second (frames/s × megapixels × scene cost). See Gpu scenes.
+    // GPU: average FPS at the fixed 1920×1080 internal resolution that a GTX 1060-class card is estimated to reach
+    // (derived from each scene's triangle / shader / bandwidth cost). Scores stay linear: 2× the FPS = 2× the points.
     public static readonly Dictionary<string, double> Gpu = new()
     {
-        ["Geometry"] = 130,     // fps at 1920×1080 equivalent
-        ["Shading"] = 75,
-        ["Compute"] = 160,
-        ["Fill-rate"] = 110,
+        ["Geometry"] = 50,     // ~46 M lit triangles per frame
+        ["Shading"] = 18,      // ray-marched terrain, ~100k FLOP per pixel
+        ["Compute"] = 250,     // 1 M particles × 4 sim steps + additive point render
+        ["Fill-rate"] = 250,   // 40 blended full-screen layers, 4 texture taps each
     };
 }
