@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <RootNamespace>BenchForge.App</RootNamespace>
+    <AssemblyName>BenchForge</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\benchforge.ico</ApplicationIcon>
+    <StartupObject>BenchForge.App.Program</StartupObject>
+    <Product>BenchForge</Product>
+    <Description>Windows hardware benchmark, stress test and crash diagnosis</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="System.Management" Version="10.0.12" />
+    <PackageReference Include="System.Diagnostics.EventLog" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BenchForge.Core\BenchForge.Core.csproj" />
+    <ProjectReference Include="..\BenchForge.Gpu\BenchForge.Gpu.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Assets\benchforge.ico" />
+  </ItemGroup>
+</Project>

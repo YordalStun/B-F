@@ -1,0 +1,258 @@
+<UserControl x:Class="BenchForge.App.Views.ResultsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:BenchForge.App.Controls">
+    <Grid Margin="26,22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Margin="0,0,0,14">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button Content="Ask AI" Command="{Binding AskAiCommand}" Margin="0,0,8,0" />
+                <Button Content="Export report (HTML)" Command="{Binding ExportHtmlCommand}" Margin="0,0,8,0" />
+                <Button Content="Export result file" Command="{Binding ExportResultCommand}" ToolTip="Save a .bfresult file to compare on another PC" />
+            </StackPanel>
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Header}" Style="{StaticResource H1}" />
+                    <Border CornerRadius="10" Padding="10,3" Margin="14,4,0,0" VerticalAlignment="Center" Background="{StaticResource Panel2}" BorderBrush="{Binding Status, Converter={StaticResource StatusBrush}}" BorderThickness="1">
+                        <TextBlock Text="{Binding StatusText}" Foreground="{Binding Status, Converter={StaticResource StatusBrush}}" FontWeight="SemiBold" />
+                    </Border>
+                </StackPanel>
+                <TextBlock Text="{Binding SubHeader}" Style="{StaticResource MutedText}" Margin="0,4,0,0" />
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Scores -->
+        <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+            <Border Style="{StaticResource Card}" Margin="0,0,10,10" Padding="18,12" MinWidth="170">
+                <StackPanel>
+                    <TextBlock Text="Overall score" Style="{StaticResource Label}" />
+                    <TextBlock Text="{Binding OverallScore}" FontSize="40" FontWeight="Bold" FontFamily="{StaticResource DisplayFont}" Foreground="{StaticResource Accent}" />
+                    <TextBlock Text="1000 = reference PC · linear" Style="{StaticResource Label}" />
+                </StackPanel>
+            </Border>
+            <ItemsControl ItemsSource="{Binding Scores}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" Margin="0,0,10,10" Padding="18,12" Width="190">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Glyph}" Style="{StaticResource Icon}" Foreground="{StaticResource Muted}" FontSize="13" />
+                                    <TextBlock Text="{Binding Name}" Style="{StaticResource Label}" Margin="6,0,0,0" FontSize="12.5" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding Score}" FontSize="32" FontWeight="SemiBold" FontFamily="{StaticResource DisplayFont}" />
+                                <Border Height="6" CornerRadius="3" Background="{StaticResource Line}" HorizontalAlignment="Stretch">
+                                    <Border HorizontalAlignment="Left" CornerRadius="3" Background="{StaticResource Accent}" Width="{Binding Fraction, Converter={StaticResource FracWidth}, ConverterParameter=152}" />
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </WrapPanel>
+
+        <TabControl Grid.Row="2">
+            <!-- Summary & fixes -->
+            <TabItem Header="Summary &amp; fixes">
+                <ScrollViewer>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="18" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <Border Visibility="{Binding HasCrash, Converter={StaticResource Vis}}" Background="#26FF6B6B" BorderBrush="{StaticResource Bad}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="What went wrong" Style="{StaticResource Label}" />
+                                    <TextBlock Text="{Binding CrashTitle}" Style="{StaticResource H2}" FontSize="18" TextWrapping="Wrap" />
+                                    <ItemsControl ItemsSource="{Binding CrashExplanation}" ItemTemplate="{StaticResource BulletTemplate}" />
+                                    <TextBlock Text="Events around the crash" Style="{StaticResource Label}" Margin="0,12,0,4" Visibility="{Binding CrashSignals.Count, Converter={StaticResource Vis}}" />
+                                    <ItemsControl ItemsSource="{Binding CrashSignals}" ItemTemplate="{StaticResource SignalTemplate}" />
+                                    <ItemsControl ItemsSource="{Binding Dumps}" Margin="0,8,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="0,4">
+                                                    <Button DockPanel.Dock="Right" Content="Deep analyze" Padding="10,4"
+                                                            Command="{Binding DataContext.DeepAnalyzeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                                    <StackPanel>
+                                                        <TextBlock><Run Text="Crash dump " /><Run Text="{Binding Path, Mode=OneWay}" Foreground="{StaticResource Muted}" /></TextBlock>
+                                                        <TextBlock Style="{StaticResource Label}"><Run Text="Stop code " /><Run Text="{Binding BugCheckHex, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding DeepAnalysis, Mode=OneWay}" /></TextBlock>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="Recommended fixes" Style="{StaticResource H2}" />
+                            <ItemsControl ItemsSource="{Binding Recommendations}" ItemTemplate="{StaticResource RecTemplate}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Findings" Style="{StaticResource H2}" />
+                            <Border Style="{StaticResource Card}">
+                                <ItemsControl ItemsSource="{Binding Findings}" ItemTemplate="{StaticResource FindingTemplate}" />
+                            </Border>
+                            <TextBlock Text="Key temperatures, usage, clocks and power" Style="{StaticResource H2}" Margin="0,14,0,8" />
+                            <ItemsControl ItemsSource="{Binding KeyCharts}" ItemTemplate="{StaticResource ChartCard}" />
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Scores per test -->
+            <TabItem Header="Test details">
+                <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding Details}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Foreground="{Binding Status, Converter={StaticResource StatusBrush}}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" />
+                                        </DockPanel>
+                                        <ItemsControl ItemsSource="{Binding Modules}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,4,0,10">
+                                                        <TextBlock FontWeight="SemiBold" FontSize="14"><Run Text="{Binding Title, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Subtitle, Mode=OneWay}" Foreground="{StaticResource Muted}" /></TextBlock>
+                                                        <TextBlock Text="{Binding Failure}" Foreground="{StaticResource Bad}" TextWrapping="Wrap" Visibility="{Binding Failure, Converter={StaticResource Vis}}" />
+                                                        <ItemsControl ItemsSource="{Binding Rows}" Margin="0,6,0,0">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Grid Margin="0,3">
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="120" /><ColumnDefinition Width="2*" /><ColumnDefinition Width="160" /><ColumnDefinition Width="80" /><ColumnDefinition Width="220" />
+                                                                        </Grid.ColumnDefinitions>
+                                                                        <TextBlock Text="{Binding Group}" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                                                        <StackPanel Grid.Column="1">
+                                                                            <TextBlock Text="{Binding Name}" />
+                                                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource Label}" Visibility="{Binding Detail, Converter={StaticResource Vis}}" />
+                                                                        </StackPanel>
+                                                                        <TextBlock Grid.Column="2" Text="{Binding Value}" FontFamily="{StaticResource MonoFont}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                                                        <TextBlock Grid.Column="3" Text="{Binding Score}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                                                        <Border Grid.Column="4" Height="8" CornerRadius="4" Background="{StaticResource Line}" Margin="14,0,0,0" VerticalAlignment="Center">
+                                                                            <Border HorizontalAlignment="Left" CornerRadius="4" Background="{StaticResource Accent}" Width="{Binding Fraction, Converter={StaticResource FracWidth}, ConverterParameter=206}" />
+                                                                        </Border>
+                                                                    </Grid>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <ItemsControl ItemsSource="{Binding Info}" Margin="0,6,0,0">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <TextBlock TextWrapping="Wrap" FontSize="12"><Run Text="{Binding Key, Mode=OneWay}" Foreground="{StaticResource Muted}" /><Run Text=": " Foreground="{StaticResource Muted}" /><Run Text="{Binding Value, Mode=OneWay}" /></TextBlock>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Any sensor graph -->
+            <TabItem Header="Sensor graphs">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="300" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <DockPanel Margin="0,0,14,0">
+                        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Button Style="{StaticResource ChipButton}" Content="Temps" Command="{Binding QuickSelectCommand}" CommandParameter="Temperature" />
+                            <Button Style="{StaticResource ChipButton}" Content="Usage" Command="{Binding QuickSelectCommand}" CommandParameter="Load" />
+                            <Button Style="{StaticResource ChipButton}" Content="Clocks" Command="{Binding QuickSelectCommand}" CommandParameter="Clock" />
+                            <Button Style="{StaticResource ChipButton}" Content="Power" Command="{Binding QuickSelectCommand}" CommandParameter="Power" />
+                            <Button Style="{StaticResource ChipButton}" Content="Fans" Command="{Binding QuickSelectCommand}" CommandParameter="Fan" />
+                            <Button Style="{StaticResource ChipButton}" Content="Voltages" Command="{Binding QuickSelectCommand}" CommandParameter="Voltage" />
+                        </WrapPanel>
+                        <TextBox DockPanel.Dock="Top" Text="{Binding ChannelFilter, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,6" ToolTip="Filter sensors" />
+                        <ListBox ItemsSource="{Binding FilteredChannels}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsChecked}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Name}" />
+                                            <TextBlock Text="{Binding Group}" Style="{StaticResource Label}" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                    <Border Grid.Column="1" Style="{StaticResource Card}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Bottom" Text="{Binding ChartUnitHint}" Style="{StaticResource Label}" />
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition /><RowDefinition Height="230" /></Grid.RowDefinitions>
+                                <c:LineChart Series="{Binding ChartSeries}" Title="Selected sensors over the whole run" />
+                                <c:LineChart Grid.Row="1" Series="{Binding TestSeries}" Title="Test speed (FPS, MB/s, points/s)" Margin="0,12,0,0" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="All sensors (min/avg/max)">
+                <DataGrid ItemsSource="{Binding Stats}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Hardware" Binding="{Binding Hardware}" Width="2*" />
+                        <DataGridTextColumn Header="Sensor" Binding="{Binding Name}" Width="2*" />
+                        <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="*" />
+                        <DataGridTextColumn Header="Min" Binding="{Binding Min, StringFormat=N2}" Width="*" />
+                        <DataGridTextColumn Header="Average" Binding="{Binding Avg, StringFormat=N2}" Width="*" />
+                        <DataGridTextColumn Header="Max" Binding="{Binding Max, StringFormat=N2}" Width="*" />
+                        <DataGridTextColumn Header="Unit" Binding="{Binding Unit}" Width="70" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem Header="Errors &amp; log">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="14" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <DataGrid ItemsSource="{Binding Errors}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Time" Binding="{Binding Time, StringFormat=HH:mm:ss}" Width="80" />
+                            <DataGridTextColumn Header="Part" Binding="{Binding Component}" Width="80" />
+                            <DataGridTextColumn Header="Test" Binding="{Binding Test}" Width="*" />
+                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="2*" />
+                            <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="2*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <DataGrid Grid.Column="2" ItemsSource="{Binding Log}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Time" Binding="{Binding Time, StringFormat=HH:mm:ss}" Width="80" />
+                            <DataGridTextColumn Header="" Binding="{Binding Severity}" Width="70" />
+                            <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Windows events">
+                <DataGrid ItemsSource="{Binding Events}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time" Binding="{Binding Time, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="150" />
+                        <DataGridTextColumn Header="Level" Binding="{Binding LevelName}" Width="90" />
+                        <DataGridTextColumn Header="Source" Binding="{Binding Provider}" Width="*" />
+                        <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="60" />
+                        <DataGridTextColumn Header="Message" Binding="{Binding FirstLine}" Width="3*" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem Header="System">
+                <ScrollViewer>
+                    <TextBox Text="{Binding HardwareText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="{StaticResource MonoFont}" FontSize="12.5" BorderThickness="0" Background="{StaticResource Panel}" Padding="14" />
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </Grid>
+</UserControl>

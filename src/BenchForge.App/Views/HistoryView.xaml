@@ -1,0 +1,45 @@
+<UserControl x:Class="BenchForge.App.Views.HistoryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="26,22">
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="History" Style="{StaticResource H1}" />
+            <TextBlock Text="Every run is saved — including ones that crashed. Select two or more (Ctrl/Shift-click) and press Compare to look for a pattern." Style="{StaticResource MutedText}" Margin="0,2,0,12" />
+            <WrapPanel Margin="0,0,0,10">
+                <Button Content="Open" Command="{Binding OpenCommand}" Margin="0,0,8,6" />
+                <Button Content="Compare selected" Style="{StaticResource PrimaryButton}" Command="{Binding CompareSelectedCommand}" Margin="0,0,8,6" />
+                <Button Content="Compare last two failures" Command="{Binding CompareCrashesCommand}" Margin="0,0,8,6" />
+                <Button Content="Ask AI" Command="{Binding AskAiCommand}" Margin="0,0,20,6" />
+                <Button Content="Import from another PC…" Command="{Binding ImportCommand}" Margin="0,0,8,6" />
+                <Button Content="Export selected…" Command="{Binding ExportCommand}" Margin="0,0,8,6" />
+                <Button Content="Delete" Command="{Binding DeleteCommand}" Margin="0,0,8,6" />
+                <Button Content="Open folder" Command="{Binding OpenFolderCommand}" Margin="0,0,8,6" />
+                <Button Content="Refresh" Command="{Binding RefreshListCommand}" Margin="0,0,8,6" />
+            </WrapPanel>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Summary}" Style="{StaticResource Label}" Margin="0,8,0,0" />
+        <DataGrid x:Name="Grid" ItemsSource="{Binding Runs}" SelectionChanged="Grid_SelectionChanged" MouseDoubleClick="Grid_MouseDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Date" Binding="{Binding StartTime, StringFormat=yyyy-MM-dd HH:mm}" Width="130" />
+                <DataGridTextColumn Header="Test" Binding="{Binding Name}" Width="2*" />
+                <DataGridTemplateColumn Header="Result" Width="130">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Status, Converter={StaticResource StatusText}}" Foreground="{Binding Status, Converter={StaticResource StatusBrush}}" FontWeight="SemiBold" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Overall" Binding="{Binding OverallScore, StringFormat=N0}" Width="80" />
+                <DataGridTextColumn Header="CPU" Binding="{Binding ComponentScores[Cpu], StringFormat=N0, FallbackValue=''}" Width="70" />
+                <DataGridTextColumn Header="RAM" Binding="{Binding ComponentScores[Memory], StringFormat=N0, FallbackValue=''}" Width="70" />
+                <DataGridTextColumn Header="Drive" Binding="{Binding ComponentScores[Storage], StringFormat=N0, FallbackValue=''}" Width="70" />
+                <DataGridTextColumn Header="GPU" Binding="{Binding ComponentScores[Gpu], StringFormat=N0, FallbackValue=''}" Width="70" />
+                <DataGridTextColumn Header="CPU max °C" Binding="{Binding MaxCpuTemp, StringFormat=N0}" Width="90" />
+                <DataGridTextColumn Header="GPU max °C" Binding="{Binding MaxGpuTemp, StringFormat=N0}" Width="90" />
+                <DataGridTextColumn Header="Errors" Binding="{Binding ErrorCount}" Width="60" />
+                <DataGridTextColumn Header="Crash" Binding="{Binding CrashSummary}" Width="2*" />
+                <DataGridTextColumn Header="PC" Binding="{Binding MachineName}" Width="*" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</UserControl>

@@ -40,7 +40,9 @@ public static class GpuProgram
             VSync = false,
             FramesPerSecond = 0,
             UpdatesPerSecond = 0,
-            WindowState = fullscreen ? WindowState.Fullscreen : WindowState.Normal,
+            // "Full screen" is borderless + maximised (not exclusive) so the BenchForge overlay can stay on top.
+            WindowState = fullscreen ? WindowState.Maximized : WindowState.Normal,
+            WindowBorder = fullscreen ? WindowBorder.Hidden : WindowBorder.Resizable,
             API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(4, 3)),
         };
 
