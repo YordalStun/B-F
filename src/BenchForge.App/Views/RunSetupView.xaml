@@ -76,6 +76,25 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Drive health check -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding IsDrive, Converter={StaticResource Vis}}">
+                    <StackPanel>
+                        <TextBlock Text="Drives to check" Style="{StaticResource H2}" />
+                        <ItemsControl ItemsSource="{Binding DriveChoices}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate><CheckBox Content="{Binding Text}" IsChecked="{Binding IsChecked}" Margin="0,2" /></DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Time per drive" VerticalAlignment="Center" />
+                            <TextBox Width="60" Text="{Binding DriveMinutes, UpdateSourceTrigger=PropertyChanged}" Margin="10,0,6,0" />
+                            <TextBlock Text="minutes" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource MutedText}" Margin="0,8,0,0"
+                                   Text="The surface scan only reads (safe for your files) and covers as much of the disk as fits in the time — big hard drives need hours for a full pass. The write-cache test writes a temporary file (up to 25 % of free space) and deletes it afterwards. Run as administrator so the whole disk can be scanned." />
+                    </StackPanel>
+                </Border>
+
                 <!-- Custom -->
                 <Border Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding IsCustom, Converter={StaticResource Vis}}">
                     <StackPanel>

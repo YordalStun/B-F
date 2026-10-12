@@ -150,6 +150,16 @@
                                                                 </DataTemplate>
                                                             </ItemsControl.ItemTemplate>
                                                         </ItemsControl>
+                                                        <ItemsControl ItemsSource="{Binding Charts}" Margin="0,8,0,0">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <StackPanel Margin="0,4,0,8">
+                                                                        <c:LineChart Height="220" Title="{Binding Title}" Series="{Binding Series}" XUnit="{Binding XUnit}" Unit="{Binding Unit}" />
+                                                                        <TextBlock Text="{Binding Note}" Style="{StaticResource Label}" TextWrapping="Wrap" Margin="46,2,0,0" Visibility="{Binding Note, Converter={StaticResource Vis}}" />
+                                                                    </StackPanel>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
                                                     </StackPanel>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>

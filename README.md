@@ -6,10 +6,11 @@ Windows hardware benchmark, stress test and crash-diagnosis tool. One portable `
 
 | | |
 |---|---|
-| **Benchmarks** | CPU (6 workloads, single + multi-thread), RAM (bandwidth + latency), drive (sequential + 4K random, cache bypassed), GPU (real OpenGL 3D scenes at a fixed 1920×1080). |
+| **Benchmarks** | CPU (6 workloads, single + multi-thread), RAM (bandwidth + latency), drive (CrystalDiskMark-style queue depths: SEQ1M Q8, 4K Q1/Q32/Q32×4, latency percentiles + stalls, 70/30 mixed, small files; cache bypassed; compared with what that kind of drive should do), GPU (real OpenGL 3D scenes at a fixed 1920×1080). |
 | **Stress / burn tests** | Every part at 100% load, alone or all together, for minutes or hours. CPU results are verified (finds silent calculation errors and which core), RAM is pattern-tested, VRAM is pattern-tested, drive data is verified. |
 | **Scores** | Linear: 1000 = reference machine, 2000 = twice as fast. Per-test sub-scores in real units (MB/s, FPS, ns, GFLOP/s). |
 | **Live view** | Time left + finish time, every step, live charts of temps/usage/clocks/power/FPS, and an always-on-top overlay that sits over the 3D test. |
+| **Drive health check** | Read-only surface scan of the whole disk (bad + slow areas, speed map like HD Tune), sustained-write test that finds where the SLC write cache runs out, SATA SMART attributes (reallocated/pending sectors, CRC cable errors), NVMe health log (% life used, spare, media errors), PCIe link check (SSD in the wrong slot), TRIM and partition alignment — with one-click fixes for TRIM. Pick several drives at once. |
 | **Results** | Recommended fixes, findings (throttling, overheating, single-channel RAM, XMP off, slow drive…), graphs of every sensor, min/avg/max of every sensor, errors, system info. Export HTML report. |
 | **Crashes** | If the PC crashes mid-test, BenchForge reopens after restart and shows what was running, the last temps/power, Windows events (blue screens, WHEA, GPU resets, disk errors) and crash-dump stop codes — with a plain-English explanation. |
 | **Compare** | Pick 2+ runs or crashes → it looks for what they have in common (same stop code, same part under load, temperature, timing, same core, same driver…). |

@@ -91,6 +91,7 @@ public static class WmiInventory
                     BusType = Int(d, "BusType") switch { 17 => "NVMe", 11 => "SATA", 7 => "USB", 8 => "RAID", 10 => "SAS", 3 => "ATA", 12 => "SD", 13 => "MMC", 15 => "File-backed", 16 => "Storage Spaces", _ => "Other" },
                     Health = Int(d, "HealthStatus") switch { 0 => "Healthy", 1 => "Warning", 2 => "Unhealthy", _ => "Unknown" },
                     Volumes = letters.TryGetValue(id, out var v) ? v : new(),
+                    DiskNumber = int.TryParse(id, out var dn) ? dn : null,
                 };
                 if (reliability.TryGetValue(id, out var rc))
                 {
@@ -128,6 +129,7 @@ public static class WmiInventory
             int a = output.LastIndexOf('('), b = output.LastIndexOf(')');
             inv.PowerPlan = a >= 0 && b > a ? output[(a + 1)..b] : output.Trim();
         });
+        Try(inv, "Drive health", () => DriveHealthReader.Fill(inv));
         Try(inv, "Laptop / battery", () =>
         {
             int[] portable = { 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 };

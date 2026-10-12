@@ -152,6 +152,17 @@ public static class AiExport
                           (d.TemperatureC != null ? $", {d.TemperatureC:0} °C" : "") + (d.WearPercent != null ? $", wear {d.WearPercent:0}%" : "") +
                           (d.PowerOnHours != null ? $", {d.PowerOnHours} h on" : "") + (d.ReadErrors is > 0 ? $", {d.ReadErrors} read errors" : "") +
                           (d.Volumes.Count > 0 ? $", {string.Join(" ", d.Volumes)}" : "") + (d.FreePercent != null ? $" ({d.FreePercent:0}% free)" : ""));
+        foreach (var d in hw.Disks.Where(d => d.Smart.Count > 0 || d.Nvme != null || d.Misaligned == true))
+        {
+            sb.AppendLine($"- **Drive health — {d.Model}:**");
+            if (d.Nvme is NvmeHealthInfo n)
+                sb.AppendLine($"  - NVMe: critical warning {Storage.SmartParser.DescribeCriticalWarning(n.CriticalWarning)}; {n.PercentageUsed}% life used; spare {n.AvailableSparePercent}% (threshold {n.SpareThresholdPercent}%); media errors {n.MediaErrors}; unsafe shutdowns {n.UnsafeShutdowns}; {n.PowerOnHours} h on; {n.PowerCycles} power cycles; {n.DataWrittenTB:0.##} TB written / {n.DataReadTB:0.##} TB read; {n.TemperatureC} °C");
+            if (d.Smart.Count > 0)
+                sb.AppendLine("  - SMART: " + string.Join("; ", d.Smart.Select(a => $"{a.Id} {a.Name} = {a.Raw} (value {a.Current}/{a.Worst}{(a.Threshold is int t ? $", threshold {t}" : "")}{(a.Failing ? ", FAILING" : "")})")));
+            if (d.Misaligned == true) sb.AppendLine("  - Partition NOT aligned to 4 KB");
+        }
+        foreach (var l in hw.PcieLinks) sb.AppendLine($"- **PCIe link — {l.Device} ({l.Kind}):** {l}{(l.Degraded ? " ← running below maximum" : "")}");
+        if (hw.TrimEnabled is bool trim) sb.AppendLine($"- **TRIM:** {(trim ? "on" : "OFF")}");
         sb.AppendLine($"- **Motherboard:** {hw.Motherboard}, BIOS {hw.BiosVersion} ({hw.BiosDate:yyyy-MM-dd})");
         sb.AppendLine($"- **Windows:** {hw.OsName} {hw.OsVersion}, last boot {hw.LastBoot:yyyy-MM-dd HH:mm}, power plan \"{hw.PowerPlan}\"");
         if (hw.IsLaptop || hw.HasBattery)
@@ -190,6 +201,13 @@ public static class AiExport
                 sb.AppendLine($"- {m.Component.Display()}{(m.Score is double sc ? $" score {sc:0}" : "")}{(m.ErrorCount > 0 ? $", **{m.ErrorCount} errors**" : "")}{(m.Failed ? $", FAILED: {m.FailureReason}" : "")}");
                 foreach (var x in m.SubScores) sb.AppendLine($"  - {x.Group} · {x.Name}: {x.Value.ToString("#,0.##", CultureInfo.InvariantCulture)} {x.Unit}{(x.Score > 0 ? $" ({x.Score:0} pts)" : "")}{(x.Detail != null ? " — " + x.Detail : "")}");
                 foreach (var kv in m.Info) sb.AppendLine($"  - {kv.Key}: {kv.Value}");
+                foreach (var ch in m.Charts)
+                {
+                    sb.AppendLine($"  - Chart \"{ch.Title}\"{(ch.Note != null ? " — " + ch.Note : "")}:").AppendLine().AppendLine("```csv").AppendLine($"{ch.XLabel},{ch.YLabel}");
+                    int step = Math.Max(1, ch.Points.Count / 200);
+                    for (int i = 0; i < ch.Points.Count; i += step) sb.AppendLine($"{ch.Points[i][0].ToString(CultureInfo.InvariantCulture)},{ch.Points[i][1].ToString(CultureInfo.InvariantCulture)}");
+                    sb.AppendLine("```").AppendLine();
+                }
             }
             sb.AppendLine();
         }

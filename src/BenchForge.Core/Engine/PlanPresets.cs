@@ -97,6 +97,22 @@ public static class PlanPresets
         return plan;
     }
 
+    /// <summary>For each chosen drive: benchmark, then surface scan of the whole disk + sustained-write cache test.</summary>
+    public static TestPlan DriveHealthCheck(TimeSpan perDrive, IReadOnlyList<string> drives, TestSettings? s = null)
+    {
+        s ??= new();
+        if (drives.Count == 0) drives = new[] { Storage.StorageModule.DefaultTarget() };
+        var plan = new TestPlan { Name = $"Drive health check ({string.Join(", ", drives.Select(d => d.TrimEnd('\\', '/')))})", Description = "Benchmarks each drive, reads the whole disk looking for bad or slow areas and measures the fast write cache.", Settings = s };
+        double health = Math.Max(120, perDrive.TotalSeconds - 92);
+        foreach (var d in drives)
+        {
+            var label = d.TrimEnd('\\', '/');
+            plan.Steps.Add(new TestStep($"Drive benchmark {label}", StepKind.Benchmark, 92, Component.Storage) { Target = d });
+            plan.Steps.Add(new TestStep($"Drive health check {label}", StepKind.Stress, health, Component.Storage) { Target = d, Variant = StepVariants.DriveHealth });
+        }
+        return plan;
+    }
+
     public static TestPlan SingleComponent(Component c, StepKind kind, TimeSpan duration, TestSettings? s = null) => new()
     {
         Name = $"{c.Display()} {(kind == StepKind.Benchmark ? "benchmark" : "stress")}",

@@ -35,6 +35,20 @@ public sealed class ModuleResult
     public string? FailureReason { get; set; }
     /// <summary>Extra facts (e.g. "Renderer", "Threads", "Bytes verified").</summary>
     public Dictionary<string, string> Info { get; set; } = new();
+    /// <summary>Extra charts produced by the test (drive surface map, sustained-write curve …).</summary>
+    public List<ChartData> Charts { get; set; } = new();
+}
+
+public sealed class ChartData
+{
+    public string Title { get; set; } = "";
+    public string XLabel { get; set; } = "";
+    public string YLabel { get; set; } = "";
+    public string Unit { get; set; } = "";
+    /// <summary>[x, y] pairs.</summary>
+    public List<double[]> Points { get; set; } = new();
+    /// <summary>Optional notes drawn under the chart (e.g. "SLC cache ends at 24 GB").</summary>
+    public string? Note { get; set; }
 }
 
 public sealed class StepResult

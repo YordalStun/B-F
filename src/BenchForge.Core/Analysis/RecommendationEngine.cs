@@ -88,6 +88,24 @@ public static class RecommendationEngine
             Add(Severity.Warning, null, "Consider replacing the battery", $"The battery has lost {r.Hardware.BatteryWearPercent:0}% of its capacity.",
                 "Check the maker's battery health tool", "Replace the battery if run time is short or the laptop shuts down under load");
 
+        if (Has(x => x.Title.Contains("interface CRC errors")))
+            Add(Severity.Warning, Component.Storage, "Replace the SATA cable", "CRC errors mean data is being corrupted on the cable between the drive and the PC.",
+                "Replace the SATA data cable (a good one with metal latch)", "Try a different SATA port on the motherboard", "Make sure the cable isn't bent sharply or pulled tight");
+        if (Has(x => x.Title.Contains("is running at PCIe") && x.Component == Component.Storage))
+            Add(Severity.Warning, Component.Storage, "Give the SSD its full PCIe speed", "The NVMe drive is connected with fewer lanes or an older PCIe generation than it supports.",
+                "Move it to the M.2 slot connected to the CPU (usually the top one — see the motherboard manual)", "In BIOS set that M.2 slot to Auto or the drive's PCIe generation", "Check whether the slot shares lanes with SATA ports or other M.2 slots");
+        if (Has(x => x.Title == "TRIM is turned off"))
+        {
+            Add(Severity.Warning, Component.Storage, "Turn TRIM back on", "SSDs need TRIM to stay fast.", "Use the fix button below, then run 'Optimise' once");
+            Fix("Turn TRIM back on", FixId.EnableTrim, FixId.RetrimSsd);
+        }
+        if (Has(x => x.Title.Contains("partition not aligned")))
+            Add(Severity.Warning, Component.Storage, "Align the SSD partition", "A misaligned partition slows the SSD and adds wear.", "Use the 'align partition' feature of a partition tool (e.g. MiniTool, AOMEI) — back up first", "Or reinstall Windows on the SSD");
+        if (Has(x => x.Title.Contains("Drive stalled")))
+            Add(Severity.Warning, Component.Storage, "Find out why the drive stalls", "The drive sometimes takes far longer than normal to respond.",
+                "Check drive health (SMART / NVMe health below) and temperature", "Keep 15%+ free space on SSDs", "Update SSD firmware and storage drivers", "For SATA drives, try another cable/port");
+        Fix("Protect your data — drive problem", FixId.ScanDisk, FixId.RepairSystemFiles);
+
         if (Has(x => x.Title.Contains("CPU fan not detected")))
             Add(Severity.Critical, Component.Cpu, "Check the CPU fan", "The CPU fan reported 0 RPM while the CPU was hot.", "Check the fan cable is on the CPU_FAN header", "Make sure the fan/pump actually spins", "Enable fan-failure warning in BIOS");
         if (Has(x => x.Title.Contains("single-channel")))

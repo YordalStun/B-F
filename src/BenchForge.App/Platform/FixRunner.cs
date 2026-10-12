@@ -67,6 +67,22 @@ public static class FixRunner
                     output("GPU timeout raised to 8 seconds. Restart for it to take effect.");
                     return true;
 
+                case FixId.EnableTrim:
+                {
+                    int code = await RunProcess("fsutil.exe", "behavior set DisableDeleteNotify 0", output, ct, Encoding.UTF8);
+                    output(code == 0 ? "TRIM is on." : "Could not change the TRIM setting.");
+                    return code == 0;
+                }
+
+                case FixId.RetrimSsd:
+                {
+                    var drive = (Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\").TrimEnd('\\');
+                    output($"Optimising {drive} (retrim)…");
+                    int code = await RunProcess("defrag.exe", $"{drive} /L /U /V", output, ct, Encoding.UTF8);
+                    output(code == 0 ? "Done." : $"defrag ended with code {code}.");
+                    return code == 0;
+                }
+
                 case FixId.CleanTempFiles:
                 {
                     long freed = 0; int count = 0;

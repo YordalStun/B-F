@@ -100,6 +100,8 @@ public static class HtmlReport
                     sb.Append("</table>");
                 }
                 if (m.Info.Count > 0) sb.Append("<dl>" + string.Concat(m.Info.Select(kv => $"<dt>{E(kv.Key)}</dt><dd>{E(kv.Value)}</dd>")) + "</dl>");
+                foreach (var c in m.Charts.Where(c => c.Points.Count > 1))
+                    sb.Append($"<div class=chart><h3>{E(c.Title)}</h3>{Svg(new() {{ (c.YLabel, c.Points.Select(p => (p[0], p[1])).ToList()) }}, c.Unit, c.XLabel)}{(c.Note != null ? $"<p class=hint>{E(c.Note)}</p>" : "")}</div>");
             }
             sb.Append("</details>");
         }
@@ -192,7 +194,7 @@ public static class HtmlReport
 
     private static readonly string[] Colors = { "#ff7a3d", "#3fa7ff", "#3cc47a", "#c77dff", "#f0b429" };
 
-    private static string Svg(List<(string Label, List<(double T, double V)> Points)> series, string unit)
+    private static string Svg(List<(string Label, List<(double T, double V)> Points)> series, string unit, string? xLabel = null)
     {
         const int W = 640, H = 220, L = 46, R = 10, T = 10, B = 26;
         double tMin = series.Min(s => s.Points.First().T), tMax = Math.Max(tMin + 1, series.Max(s => s.Points.Last().T));
@@ -210,7 +212,7 @@ public static class HtmlReport
         for (int i = 0; i <= 4; i++)
         {
             double t = tMin + (tMax - tMin) * i / 4;
-            sb.Append($"<text x={N(X(t), "0.0")} y={H - 6} text-anchor=middle>{TimeFormat.Short(TimeSpan.FromSeconds(t))}</text>");
+            sb.Append($"<text x={N(X(t), "0.0")} y={H - 6} text-anchor=middle>{(xLabel == null ? TimeFormat.Short(TimeSpan.FromSeconds(t)) : N(t, "0.#") + (xLabel.StartsWith("GB") ? " GB" : xLabel.Contains('%') ? "%" : ""))}</text>");
         }
         sb.Append("</g>");
         int ci = 0;

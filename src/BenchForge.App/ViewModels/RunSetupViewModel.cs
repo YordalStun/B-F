@@ -18,6 +18,13 @@ public sealed partial class PresetOption : ObservableObject
     [ObservableProperty] private bool _isSelected;
 }
 
+public sealed partial class DriveChoice : ObservableObject
+{
+    public string Drive { get; init; } = "";
+    public string Text { get; init; } = "";
+    [ObservableProperty] private bool _isChecked;
+}
+
 public sealed record StepPreview(string Name, string Kind, string Parts, string Duration);
 
 public sealed partial class CustomStep : ObservableObject
@@ -41,6 +48,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
             new() { Key = "burn", Title = "Burn test", Glyph = "", Description = "Hammer the parts you pick at 100% at the same time for as long as you like." },
             new() { Key = "rotation", Title = "Stability rotation", Glyph = "", Description = "Each part alone, then all together, repeating — finds which part is unstable." },
             new() { Key = "overnight", Title = "Overnight", Glyph = "", Description = "Benchmark, hours of stability testing, then benchmark again to spot heat/ageing drops." },
+            new() { Key = "drive", Title = "Drive health check", Glyph = "\uEDA2", Description = "Deep drive test: benchmark, full surface scan for bad sectors and the write-cache test, per drive." },
             new() { Key = "single", Title = "One part", Glyph = "", Description = "Benchmark or stress just the CPU, RAM, drive or GPU." },
             new() { Key = "custom", Title = "Custom plan", Glyph = "", Description = "Build your own list of steps, and loop it." },
         };
@@ -57,8 +65,15 @@ public sealed partial class RunSetupViewModel : PageViewModel
         _laptopMode = t.LaptopMode;
         _cpuTempLimit = t.CpuTempLimit; _gpuTempLimit = t.GpuTempLimit; _stopOnError = t.StopOnError; _reopenAfterCrash = t.ReopenAfterCrash; _storageFileMB = t.StorageFileMB;
         foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
+        {
             Drives.Add(d.Name);
+            var label = string.IsNullOrWhiteSpace(d.VolumeLabel) ? "" : $" {d.VolumeLabel}";
+            var dc = new DriveChoice { Drive = d.Name, Text = $"{d.Name.TrimEnd('\\')}{label} — {d.AvailableFreeSpace / 1e9:0} GB free of {d.TotalSize / 1e9:0} GB" };
+            dc.PropertyChanged += (_, _) => Rebuild();
+            DriveChoices.Add(dc);
+        }
         _storageTarget = Drives.Contains(t.StorageTarget) ? t.StorageTarget : Drives.FirstOrDefault(d => d == StorageModule.DefaultTarget()) ?? Drives.FirstOrDefault() ?? "";
+        foreach (var dc in DriveChoices) dc.IsChecked = dc.Drive == _storageTarget;
         PropertyChanged += OnAnyChanged;
         Rebuild();
     }
@@ -79,6 +94,10 @@ public sealed partial class RunSetupViewModel : PageViewModel
     public StepKind[] Kinds { get; } = Enum.GetValues<StepKind>();
     [ObservableProperty] private Component _singleComponent = Component.Cpu;
     [ObservableProperty] private StepKind _singleKind = StepKind.Stress;
+    // Drive health check
+    public ObservableCollection<DriveChoice> DriveChoices { get; } = new();
+    [ObservableProperty] private int _driveMinutes = 20;
+    [ObservableProperty] private bool _isDrive;
     // Custom
     public ObservableCollection<CustomStep> CustomSteps { get; } = new();
     [ObservableProperty] private StepKind _newKind = StepKind.Stress;
@@ -141,7 +160,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
     private bool _rebuilding;
     private void OnAnyChanged(object? s, PropertyChangedEventArgs e)
     {
-        if (_rebuilding || e.PropertyName is nameof(TotalText) or nameof(FinishText) or nameof(PlanWarning) or nameof(NeedsDuration) or nameof(NeedsParts) or nameof(IsSingle) or nameof(IsCustom)) return;
+        if (_rebuilding || e.PropertyName is nameof(TotalText) or nameof(FinishText) or nameof(PlanWarning) or nameof(NeedsDuration) or nameof(NeedsParts) or nameof(IsSingle) or nameof(IsCustom) or nameof(IsDrive)) return;
         Rebuild();
     }
 
@@ -175,6 +194,9 @@ public sealed partial class RunSetupViewModel : PageViewModel
             "burn" => BurnParts().Count == 0 ? null : PlanPresets.BurnIn(dur, BurnParts(), s),
             "rotation" => PlanPresets.StabilityRotation(dur, s),
             "overnight" => PlanPresets.Overnight(dur, s),
+            "drive" => DriveChoices.Any(d => d.IsChecked)
+                ? PlanPresets.DriveHealthCheck(TimeSpan.FromMinutes(Math.Max(3, DriveMinutes)), DriveChoices.Where(d => d.IsChecked).Select(d => d.Drive).ToList(), s)
+                : null,
             "single" => SingleKind == StepKind.Benchmark
                 ? new TestPlan { Name = $"{SingleComponent.Display()} benchmark", Settings = s, Steps = { PlanPresets.FullBenchmark(s).Steps.First(x => x.Kind == StepKind.Benchmark && x.Components.Contains(SingleComponent)) } }
                 : PlanPresets.SingleComponent(SingleComponent, StepKind.Stress, dur, s),
@@ -197,9 +219,10 @@ public sealed partial class RunSetupViewModel : PageViewModel
             NeedsParts = key == "burn";
             IsSingle = key == "single";
             IsCustom = key == "custom";
+            IsDrive = key == "drive";
             Preview.Clear();
             var plan = BuildPlan();
-            PlanWarning = plan == null ? (key == "burn" ? "Pick at least one part to stress." : key == "custom" ? "Add at least one step." : null) : null;
+            PlanWarning = plan == null ? (key == "burn" ? "Pick at least one part to stress." : key == "custom" ? "Add at least one step." : key == "drive" ? "Pick at least one drive." : null) : null;
             if (plan == null) { TotalText = ""; FinishText = ""; return; }
             var steps = plan.Expand();
             // Long plans: show the first steps and a summary line.

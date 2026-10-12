@@ -571,3 +571,164 @@ public class LaptopModeTests
         Assert.Contains(r.Recommendations, x => x.Title == "Consider replacing the battery");
     }
 }
+
+public class DriveTests
+{
+    private static byte[] AtaBlock(params (int Id, int Cur, int Worst, long Raw)[] attrs)
+    {
+        var b = new byte[512];
+        b[0] = 0x10; // revision
+        for (int i = 0; i < attrs.Length; i++)
+        {
+            int o = 2 + i * 12;
+            b[o] = (byte)attrs[i].Id; b[o + 1] = 0x33; b[o + 2] = 0x00;
+            b[o + 3] = (byte)attrs[i].Cur; b[o + 4] = (byte)attrs[i].Worst;
+            for (int k = 0; k < 6; k++) b[o + 5 + k] = (byte)(attrs[i].Raw >> (8 * k));
+        }
+        return b;
+    }
+
+    [Fact]
+    public void Ata_smart_attributes_parse_from_raw_bytes()
+    {
+        // Temperature 194 packs min/max in the upper raw bytes; only the low byte is the current value.
+        var data = AtaBlock((5, 100, 100, 8), (9, 95, 95, 12345), (194, 64, 50, 0x2D_0014_0024), (199, 200, 200, 0x01_0203));
+        var th = new byte[512];
+        th[2] = 5; th[3] = 10; th[14] = 9; th[15] = 0;
+        var a = Storage.SmartParser.ParseAta(data, th);
+        Assert.Equal(4, a.Count);
+        Assert.Equal("Reallocated sectors", a[0].Name);
+        Assert.Equal(8, a[0].Raw);
+        Assert.Equal(10, a[0].Threshold);
+        Assert.False(a[0].Failing);
+        Assert.Equal(12345, a[1].Raw);
+        Assert.Equal(0x24, a[2].Raw);
+        Assert.Equal(0x010203, a[3].Raw);
+        Assert.Null(a[3].Threshold);
+    }
+
+    [Fact]
+    public void Smart_attribute_fails_at_threshold()
+    {
+        var a = Storage.SmartParser.ParseAta(AtaBlock((5, 9, 9, 900)), new byte[] { 0, 0, 5, 10 });
+        Assert.True(a[0].Failing);
+    }
+
+    [Fact]
+    public void Nvme_health_log_parses()
+    {
+        var log = new byte[512];
+        log[0] = 0x04;
+        BitConverter.GetBytes((ushort)(273 + 41)).CopyTo(log, 1);
+        log[3] = 98; log[4] = 10; log[5] = 7;
+        BitConverter.GetBytes(20_000_000UL).CopyTo(log, 32); // data units read
+        BitConverter.GetBytes(40_000_000UL).CopyTo(log, 48); // data units written
+        BitConverter.GetBytes(1500UL).CopyTo(log, 112);
+        BitConverter.GetBytes(8760UL).CopyTo(log, 128);
+        BitConverter.GetBytes(77UL).CopyTo(log, 144);
+        BitConverter.GetBytes(3UL).CopyTo(log, 160);
+        var n = Storage.SmartParser.ParseNvme(log);
+        Assert.Equal(4, n.CriticalWarning);
+        Assert.Equal(41, n.TemperatureC);
+        Assert.Equal(98, n.AvailableSparePercent);
+        Assert.Equal(10, n.SpareThresholdPercent);
+        Assert.Equal(7, n.PercentageUsed);
+        Assert.Equal(10.24, n.DataReadTB, 2);
+        Assert.Equal(20.48, n.DataWrittenTB, 2);
+        Assert.Equal(1500, n.PowerCycles);
+        Assert.Equal(8760, n.PowerOnHours);
+        Assert.Equal(77, n.UnsafeShutdowns);
+        Assert.Equal(3, n.MediaErrors);
+        Assert.Contains("reliability degraded", Storage.SmartParser.DescribeCriticalWarning(n.CriticalWarning));
+    }
+
+    [Fact]
+    public void Slc_cache_knee_is_found()
+    {
+        var pts = new List<double[]>();
+        for (int i = 1; i <= 60; i++) pts.Add(new[] { i * 0.5, i * 0.5 <= 12 ? 3000 + (i % 3) * 20 : 450 + (i % 4) * 10 });
+        var r = Storage.DriveAnalysis.DetectSlc(pts);
+        Assert.True(r.Detected);
+        Assert.InRange(r.CacheGB!.Value, 11.5, 13);
+        Assert.InRange(r.CachedMBs, 2990, 3050);
+        Assert.InRange(r.AfterMBs, 440, 490);
+    }
+
+    [Fact]
+    public void Flat_write_curve_has_no_slc_knee()
+    {
+        var pts = Enumerable.Range(1, 40).Select(i => new[] { i * 1.0, 520 + (i % 5) * 5.0 }).ToList();
+        Assert.False(Storage.DriveAnalysis.DetectSlc(pts).Detected);
+    }
+
+    [Fact]
+    public void Spread_order_visits_every_block_once_and_spreads_early()
+    {
+        var order = Storage.DriveAnalysis.SpreadOrder(1000).ToList();
+        Assert.Equal(1000, order.Count);
+        Assert.Equal(1000, order.Distinct().Count());
+        // The first 16 reads already touch every 1/8 of the disk.
+        Assert.Equal(8, order.Take(16).Select(x => x * 8 / 1000).Distinct().Count());
+    }
+
+    [Fact]
+    public void Expected_speed_depends_on_drive_kind()
+    {
+        Assert.Equal(3000, Storage.SmartParser.Expected(new DiskInfo { BusType = "NVMe", MediaType = "SSD" }, new PcieLink("x", "NVMe", 4, 4, 4, 4)).ExpectedSeqRead);
+        Assert.Equal(420, Storage.SmartParser.Expected(new DiskInfo { BusType = "SATA", MediaType = "SSD" }, null).ExpectedSeqRead);
+        Assert.Equal(90, Storage.SmartParser.Expected(new DiskInfo { BusType = "SATA", MediaType = "HDD" }, null).ExpectedSeqRead);
+    }
+
+    private static List<Recommendation> Checks(Action<HardwareInventory> setup)
+    {
+        var hw = new HardwareInventory();
+        setup(hw);
+        return RecommendationEngine.SystemChecks(hw);
+    }
+
+    [Fact]
+    public void Damaged_sectors_and_cable_errors_are_reported()
+    {
+        var hw = new HardwareInventory();
+        hw.Disks.Add(new DiskInfo { Model = "OldDisk", MediaType = "HDD", BusType = "SATA", Smart = { new(5, "Reallocated sectors", 100, 100, 10, 24), new(199, "Interface CRC errors (cable)", 200, 200, 0, 31) } });
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Critical && f.Title.Contains("damaged sectors"));
+        Assert.Contains(r.Findings, f => f.Title.Contains("CRC errors"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Replace the SATA cable");
+    }
+
+    [Fact]
+    public void Worn_nvme_and_slow_link_are_reported()
+    {
+        var hw = new HardwareInventory();
+        hw.Disks.Add(new DiskInfo { Model = "FastSSD", MediaType = "SSD", BusType = "NVMe", Nvme = new NvmeHealthInfo { PercentageUsed = 104, AvailableSparePercent = 100, SpareThresholdPercent = 10 } });
+        hw.PcieLinks.Add(new PcieLink("FastSSD", "NVMe", 3, 2, 4, 4));
+        hw.PcieLinks.Add(new PcieLink("GPU", "GPU", 1, 16, 4, 16));
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Critical && f.Title.Contains("past its rated lifetime"));
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Warning && f.Title.StartsWith("FastSSD is running at PCIe 3.0 ×2"));
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Info && f.Component == Component.Gpu);
+        Assert.Contains(r.Recommendations, x => x.Title == "Give the SSD its full PCIe speed");
+    }
+
+    [Fact]
+    public void Trim_off_offers_one_click_fix()
+    {
+        var recs = Checks(hw => { hw.TrimEnabled = false; hw.Disks.Add(new DiskInfo { Model = "SSD", MediaType = "SSD", BusType = "SATA" }); });
+        var trim = Assert.Single(recs, x => x.Title == "Turn TRIM back on");
+        Assert.Contains(FixId.EnableTrim, trim.Fixes);
+    }
+
+    [Fact]
+    public void Healthy_drive_gives_no_drive_warnings()
+    {
+        var hw = new HardwareInventory { TrimEnabled = true };
+        hw.Disks.Add(new DiskInfo { Model = "Good", MediaType = "SSD", BusType = "NVMe", Nvme = new NvmeHealthInfo { PercentageUsed = 3, AvailableSparePercent = 100, SpareThresholdPercent = 10, PowerCycles = 900, UnsafeShutdowns = 20 } });
+        hw.PcieLinks.Add(new PcieLink("Good", "NVMe", 4, 4, 4, 4));
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        Assert.DoesNotContain(r.Findings, f => f.Component == Component.Storage && f.Severity >= Severity.Warning);
+    }
+}

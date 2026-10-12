@@ -54,6 +54,7 @@ public sealed class LineChart : FrameworkElement
     public static readonly DependencyProperty YMinProperty = DependencyProperty.Register(nameof(YMin), typeof(double), typeof(LineChart), new FrameworkPropertyMetadata(double.NaN, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty YMaxProperty = DependencyProperty.Register(nameof(YMax), typeof(double), typeof(LineChart), new FrameworkPropertyMetadata(double.NaN, FrameworkPropertyMetadataOptions.AffectsRender));
     public static readonly DependencyProperty WindowSecondsProperty = DependencyProperty.Register(nameof(WindowSeconds), typeof(double), typeof(LineChart), new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
+    public static readonly DependencyProperty XUnitProperty = DependencyProperty.Register(nameof(XUnit), typeof(string), typeof(LineChart), new FrameworkPropertyMetadata("", FrameworkPropertyMetadataOptions.AffectsRender));
 
     public IEnumerable<ChartSeries>? Series { get => (IEnumerable<ChartSeries>?)GetValue(SeriesProperty); set => SetValue(SeriesProperty, value); }
     public string Title { get => (string)GetValue(TitleProperty); set => SetValue(TitleProperty, value); }
@@ -63,6 +64,8 @@ public sealed class LineChart : FrameworkElement
     public double YMax { get => (double)GetValue(YMaxProperty); set => SetValue(YMaxProperty, value); }
     /// <summary>Only show the last N seconds (0 = everything).</summary>
     public double WindowSeconds { get => (double)GetValue(WindowSecondsProperty); set => SetValue(WindowSecondsProperty, value); }
+    /// <summary>When set, X is a plain number in this unit (e.g. "GB", "%") instead of seconds.</summary>
+    public string XUnit { get => (string)GetValue(XUnitProperty); set => SetValue(XUnitProperty, value); }
 
     private Point? _mouse;
     private bool _pending;
@@ -166,7 +169,7 @@ public sealed class LineChart : FrameworkElement
         for (int i = 0; i <= 4; i++)
         {
             double xv = xMin + (xMax - xMin) * i / 4;
-            var t = Text(TimeLabel(xv), 10.5, TextBrush);
+            var t = Text(XLabel(xv), 10.5, TextBrush);
             double x = X(xv) - t.Width / 2;
             dc.DrawText(t, new Point(Math.Clamp(x, plot.Left - 10, w - t.Width), plot.Bottom + 4));
         }
@@ -207,7 +210,7 @@ public sealed class LineChart : FrameworkElement
         {
             double xv = xMin + (m.X - plot.Left) / plot.Width * (xMax - xMin);
             dc.DrawLine(CursorPen, new Point(m.X, plot.Top), new Point(m.X, plot.Bottom));
-            var lines = new List<(Brush B, string T)> { (FgBrush, TimeLabel(xv)) };
+            var lines = new List<(Brush B, string T)> { (FgBrush, XLabel(xv)) };
             foreach (var (s, p) in series)
             {
                 if (p.Count == 0) continue;
@@ -229,6 +232,8 @@ public sealed class LineChart : FrameworkElement
     }
 
     private static string Fmt(double v) => Math.Abs(v) >= 1000 ? v.ToString("N0") : Math.Abs(v) >= 100 ? v.ToString("0") : v.ToString("0.#");
+
+    private string XLabel(double x) => string.IsNullOrEmpty(XUnit) ? TimeLabel(x) : $"{Fmt(x)} {XUnit}";
 
     private static string TimeLabel(double s)
     {

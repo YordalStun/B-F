@@ -6,6 +6,10 @@ public sealed class TestStep
     public StepKind Kind { get; set; }
     public List<Component> Components { get; set; } = new();
     public double DurationSeconds { get; set; }
+    /// <summary>Special test flavour, e.g. <see cref="StepVariants.DriveHealth"/>.</summary>
+    public string? Variant { get; set; }
+    /// <summary>Drive/folder for storage steps; overrides <see cref="TestSettings.StorageTarget"/>.</summary>
+    public string? Target { get; set; }
 
     public TestStep() { }
     public TestStep(string name, StepKind kind, double seconds, params Component[] components)
@@ -17,6 +21,12 @@ public sealed class TestStep
 }
 
 public enum LaptopMode { Auto, On, Off }
+
+public static class StepVariants
+{
+    /// <summary>Storage: surface read scan + sustained-write (SLC cache) test.</summary>
+    public const string DriveHealth = "drive-health";
+}
 
 public sealed class TestSettings
 {
@@ -61,7 +71,7 @@ public sealed class TestPlan
         int loops = Math.Max(1, Loops);
         for (int l = 0; l < loops; l++)
             foreach (var s in Steps)
-                list.Add(new TestStep(loops > 1 ? $"{s.Name} (loop {l + 1}/{loops})" : s.Name, s.Kind, s.DurationSeconds, s.Components.ToArray()));
+                list.Add(new TestStep(loops > 1 ? $"{s.Name} (loop {l + 1}/{loops})" : s.Name, s.Kind, s.DurationSeconds, s.Components.ToArray()) { Variant = s.Variant, Target = s.Target });
         return list;
     }
 }

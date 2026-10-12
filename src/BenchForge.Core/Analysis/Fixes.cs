@@ -11,6 +11,8 @@ public enum FixId
     EnableCrashDumps,
     IncreaseTdrDelay,
     CleanTempFiles,
+    EnableTrim,
+    RetrimSsd,
 }
 
 public sealed record FixInfo(FixId Id, string Title, string WhatItDoes, bool NeedsRestart, string HowToUndo);
@@ -35,6 +37,10 @@ public static class Fixes
             "Windows resets the graphics driver if the GPU doesn't respond within 2 seconds. Raising this to 8 seconds stops false resets on heavy loads. It does NOT fix a truly unstable GPU.", true, "Delete the TdrDelay value under HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers."),
         [FixId.CleanTempFiles] = new(FixId.CleanTempFiles, "Clean temporary files",
             "Deletes temporary files older than a day from your Temp folder and Windows\\Temp to free disk space.", false, "Not needed — only temporary files are removed."),
+        [FixId.EnableTrim] = new(FixId.EnableTrim, "Turn TRIM on",
+            "Runs 'fsutil behavior set DisableDeleteNotify 0' so Windows tells SSDs which blocks are free.", false, "fsutil behavior set DisableDeleteNotify 1"),
+        [FixId.RetrimSsd] = new(FixId.RetrimSsd, "Optimise (re-TRIM) the system SSD",
+            "Runs Windows' 'Optimize Drives' retrim on the system SSD (defrag C: /L). Safe, takes a minute.", false, "Nothing to undo."),
     };
 
     public static FixInfo Get(FixId id) => All[id];

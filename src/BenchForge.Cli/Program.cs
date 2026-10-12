@@ -56,6 +56,7 @@ TestPlan plan = argList[0] switch
 {
     "quick" => PlanPresets.QuickBenchmark(settings),
     "bench" => new TestPlan { Name = "bench", Settings = settings, Steps = { PlanPresets.QuickBenchmark().Steps.First(s => s.Components.Contains(Parse(argList[1]))) } },
+    "health" => PlanPresets.DriveHealthCheck(TimeSpan.FromSeconds(double.Parse(argList[1], CultureInfo.InvariantCulture)), new[] { Path.GetTempPath() }, settings),
     "stress" => new TestPlan { Name = "stress", Settings = settings, Steps = { new TestStep("Stress", StepKind.Stress, double.Parse(argList[2], CultureInfo.InvariantCulture), argList[1].Split(',').Select(Parse).ToArray()) } },
     _ => throw new ArgumentException("unknown command"),
 };
@@ -79,6 +80,7 @@ foreach (var m in result.AllModules)
     Console.WriteLine($"== {m.Component} {m.Kind} score {m.Score?.ToString("0") ?? "-"} {(m.Failed ? "FAILED: " + m.FailureReason : "")}");
     foreach (var s in m.SubScores) Console.WriteLine($"   {s.Group,-14} {s.Name,-36} {s.Value,12:#,0.##} {s.Unit,-16} {s.Score,7:0}");
     foreach (var kv in m.Info) Console.WriteLine($"   - {kv.Key}: {kv.Value}");
+    foreach (var c in m.Charts) Console.WriteLine($"   [chart] {c.Title}: {c.Points.Count} points; {c.Note}");
 }
 foreach (var f in result.Findings) Console.WriteLine($"[{f.Severity}] {f.Title} {f.Detail}");
 foreach (var r in result.Recommendations) Console.WriteLine($"FIX [{r.Severity}] {r.Title}");

@@ -266,26 +266,99 @@ public static class RunAnalyzer
             if (slow.Count > 0)
                 f.Add(new Finding { Severity = Severity.Info, Component = Component.Memory, Title = $"RAM running at {slow[0].ConfiguredSpeedMTs} MT/s (rated {slow[0].SpeedMTs} MT/s)", Detail = "The memory profile (XMP/EXPO) is not enabled in the BIOS — free performance is available." });
         }
-        var disk = r.AllModules.FirstOrDefault(m => m.Component == Component.Storage && m.Kind == StepKind.Benchmark && !m.Failed);
-        if (disk != null)
+        foreach (var disk in r.AllModules.Where(m => m.Component == Component.Storage && m.Kind == StepKind.Benchmark && !m.Failed))
         {
-            double seq = disk.SubScores.FirstOrDefault(s => s.Name == "Sequential read")?.Value ?? 0;
+            double seq = disk.SubScores.FirstOrDefault(s => s.Name.StartsWith("Sequential read"))?.Value ?? 0;
             var target = disk.Info.GetValueOrDefault("Target", "");
             var drive = hw?.Disks.FirstOrDefault(d => d.Volumes.Any(v => target.StartsWith(v, StringComparison.OrdinalIgnoreCase)));
-            if (drive != null)
-            {
-                if (drive.BusType.Contains("NVMe", StringComparison.OrdinalIgnoreCase) && seq > 0 && seq < 1200)
-                    f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"NVMe drive slower than expected ({seq:0} MB/s)", Detail = "NVMe drives should read well above 1500 MB/s. Check the M.2 slot (chipset/shared lanes), PCIe generation in BIOS, thermal throttling, and that the drive isn't nearly full." });
-                if (drive.MediaType == "SSD" && drive.BusType.Contains("SATA", StringComparison.OrdinalIgnoreCase) && seq > 0 && seq < 350)
-                    f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"SATA SSD slower than expected ({seq:0} MB/s)", Detail = "SATA SSDs normally reach ~500 MB/s. Check AHCI mode, SATA cable/port (use SATA3 6Gb/s ports), and free space." });
-            }
+            if (drive == null || seq <= 0) continue;
+            var link = drive.BusType.Contains("NVMe", StringComparison.OrdinalIgnoreCase) ? hw!.PcieLinks.FirstOrDefault(l => l.Kind == "NVMe") : null;
+            var (expected, kind) = Storage.SmartParser.Expected(drive, link);
+            if (expected <= 0) continue;
+            if (seq < expected * 0.6)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Component = Component.Storage,
+                    Title = $"{drive.Model} is slower than a {kind} should be ({seq:0} MB/s, expected {expected:0}+)",
+                    Detail = drive.MediaType == "HDD" ? "Hard drives slow down when fragmented or failing; check health." :
+                             drive.BusType.Contains("NVMe", StringComparison.OrdinalIgnoreCase)
+                                 ? "Check the M.2 slot (CPU-connected slot, PCIe generation in BIOS), drive temperature/throttling and free space."
+                                 : "Check the SATA cable and port (use SATA 6 Gb/s), AHCI mode and free space.",
+                });
+            else
+                f.Add(new Finding { Severity = Severity.Info, Component = Component.Storage, Title = $"{drive.Model}: speed as expected for a {kind} ({seq:0} MB/s)" });
         }
+        foreach (var m in r.AllModules.Where(m => m.Component == Component.Storage))
+        {
+            foreach (var st in m.SubScores.Where(s => s.Name.Contains("stalls over 50 ms") && s.Value > 0))
+                f.Add(new Finding { Severity = st.Value >= 5 ? Severity.Warning : Severity.Info, Component = Component.Storage, Title = $"Drive stalled {st.Value:0}× for over 50 ms ({st.Name.Split(' ')[0].ToLowerInvariant()}s)", Detail = "Short freezes while the PC waits for the drive. Common with failing drives, overheating NVMe, DRAM-less SSDs that are nearly full, or loose cables." });
+            var bad = m.SubScores.FirstOrDefault(s => s.Name.StartsWith("Unreadable areas"));
+            if (bad is { Value: > 0 }) f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"Surface scan found {bad.Value:0} unreadable areas (bad sectors)", Detail = "Data in those areas can't be read. Back up now and replace the drive. " + m.Info.GetValueOrDefault("Unreadable areas at (GB)", "") });
+            var slowAreas = m.SubScores.FirstOrDefault(s => s.Name.StartsWith("Slow areas"));
+            if (slowAreas is { Value: > 0 }) f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"Surface scan found {slowAreas.Value:0} very slow areas (over 500 ms per read)", Detail = "Weak areas the drive struggles to read — often the first sign of a failing hard drive or worn SSD." });
+            var cache = m.SubScores.FirstOrDefault(s => s.Name == "Fast write cache (SLC) size");
+            var after = m.SubScores.FirstOrDefault(s => s.Name == "Write speed after cache is full");
+            if (cache != null && after != null)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Info, Component = Component.Storage,
+                    Title = $"Fast write cache runs out after ~{cache.Value:0.#} GB, then {after.Value:0} MB/s",
+                    Detail = after.Value < 200 ? "Large copies (games, videos) will slow down a lot once the cache is full — typical of QLC / budget SSDs. Normal behaviour, not a fault." : "Normal SSD behaviour; speed after the cache is still decent.",
+                });
+        }
+        DriveHealthFindings(hw, f);
         var gpu = r.AllModules.FirstOrDefault(m => m.Component == Component.Gpu && m.Info.TryGetValue("Renderer", out var rend) && (rend.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase) || rend.Contains("Microsoft Basic", StringComparison.OrdinalIgnoreCase) || rend.Contains("GDI Generic", StringComparison.OrdinalIgnoreCase)));
         if (gpu != null)
             f.Add(new Finding { Severity = Severity.Critical, Component = Component.Gpu, Title = "3D test ran on a software renderer", Detail = $"Renderer was '{gpu.Info["Renderer"]}', not your graphics card. The GPU driver is missing or broken — install the latest driver from NVIDIA/AMD/Intel." });
         var intel = r.AllModules.FirstOrDefault(m => m.Component == Component.Gpu && m.Info.TryGetValue("Renderer", out var rend) && rend.Contains("Intel", StringComparison.OrdinalIgnoreCase));
         if (intel != null && hw != null && hw.Gpus.Count > 1 && hw.Gpus.Any(g => !g.Name.Contains("Intel", StringComparison.OrdinalIgnoreCase)))
             f.Add(new Finding { Severity = Severity.Warning, Component = Component.Gpu, Title = "3D test ran on the integrated GPU", Detail = "A dedicated graphics card is installed but the test used Intel graphics. On laptops, set BenchForge to 'High performance' in Windows Settings › Display › Graphics; on desktops plug the monitor into the graphics card." });
+    }
+
+    /// <summary>Findings that come from drive health data alone (SMART, NVMe log, PCIe link, TRIM, alignment).</summary>
+    private static void DriveHealthFindings(HardwareInventory? hw, List<Finding> f)
+    {
+        if (hw == null) return;
+        foreach (var d in hw.Disks)
+        {
+            long Raw(int id) => d.Smart.FirstOrDefault(a => a.Id == id)?.Raw ?? 0;
+            long realloc = Raw(5), pending = Raw(197), uncorrectable = Raw(198), crc = Raw(199);
+            if (realloc + pending + uncorrectable > 0)
+                f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"{d.Model}: SMART shows damaged sectors", Detail = $"Reallocated {realloc}, pending {pending}, uncorrectable {uncorrectable}. The drive is wearing out or failing — back up now." });
+            foreach (var a in d.Smart.Where(a => a.Failing))
+                f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"{d.Model}: SMART attribute '{a.Name}' has failed its threshold", Detail = $"Value {a.Current}, threshold {a.Threshold}." });
+            if (crc > 0)
+                f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"{d.Model}: {crc} interface CRC errors", Detail = "Data got corrupted on the way between drive and PC — almost always a bad or loose SATA cable or port, not the drive itself." });
+            if (d.Nvme is NvmeHealthInfo n)
+            {
+                if (n.CriticalWarning != 0)
+                    f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"{d.Model}: NVMe critical warning", Detail = Storage.SmartParser.DescribeCriticalWarning(n.CriticalWarning) + ". Back up now." });
+                if (n.SpareThresholdPercent > 0 && n.AvailableSparePercent <= n.SpareThresholdPercent)
+                    f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"{d.Model}: spare space used up ({n.AvailableSparePercent}%)", Detail = "The SSD has run out of spare blocks to replace worn ones." });
+                if (n.PercentageUsed >= 100)
+                    f.Add(new Finding { Severity = Severity.Critical, Component = Component.Storage, Title = $"{d.Model}: past its rated lifetime ({n.PercentageUsed}% used)", Detail = $"{n.DataWrittenTB:0.#} TB written. Plan a replacement and keep backups." });
+                else if (n.PercentageUsed >= 80)
+                    f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"{d.Model}: {n.PercentageUsed}% of rated lifetime used", Detail = $"{n.DataWrittenTB:0.#} TB written." });
+                if (n.MediaErrors > 0)
+                    f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"{d.Model}: {n.MediaErrors} media errors", Detail = "The SSD has hit uncorrectable data errors. Back up important data and watch the count." });
+                if (n.UnsafeShutdowns > 50 && n.PowerCycles > 0 && n.UnsafeShutdowns > n.PowerCycles * 0.2)
+                    f.Add(new Finding { Severity = Severity.Info, Component = Component.Storage, Title = $"{d.Model}: {n.UnsafeShutdowns} unsafe shutdowns", Detail = "Many power losses / hard resets — matches crash or power problems if you have them." });
+            }
+            if (d.Misaligned == true && d.MediaType == "SSD")
+                f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"{d.Model}: partition not aligned to 4 KB", Detail = "Usually from cloning an old hard drive. Every write touches two flash pages — slower and more wear. Fix with a partition tool's 'align' function or a fresh install." });
+        }
+        foreach (var l in hw.PcieLinks.Where(l => l.Degraded))
+            f.Add(new Finding
+            {
+                // GPUs drop their link to save power at idle, so a low reading taken at idle is only informational.
+                Severity = l.Kind == "GPU" ? Severity.Info : Severity.Warning, Component = l.Kind == "GPU" ? Component.Gpu : Component.Storage,
+                Title = $"{l.Device} is running at PCIe {l.CurrentGen}.0 ×{l.CurrentWidth} (supports {l.MaxGen}.0 ×{l.MaxWidth})",
+                Detail = l.Kind == "GPU"
+                    ? "Graphics cards drop link speed when idle — this only matters if it stays low under load. Otherwise check the card is in the top x16 slot, the riser cable, and the PCIe setting in BIOS."
+                    : "The SSD is limited by its slot: use an M.2 slot wired to the CPU, check the BIOS PCIe setting, and that the slot isn't sharing lanes with SATA ports.",
+            });
+        if (hw.TrimEnabled == false && hw.Disks.Any(d => d.MediaType == "SSD"))
+            f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = "TRIM is turned off", Detail = "Without TRIM, SSDs slow down over time and wear faster." });
     }
 
     private static void Power(RunResult r, List<Finding> f)

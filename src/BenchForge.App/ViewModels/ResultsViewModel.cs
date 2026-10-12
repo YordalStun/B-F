@@ -16,7 +16,20 @@ namespace BenchForge.App.ViewModels;
 
 public sealed record ScoreCard(string Name, string Score, double Fraction, string Glyph);
 public sealed record SubScoreRow(string Group, string Name, string Value, string Score, double Fraction, string? Detail);
-public sealed record ModuleBlock(string Title, string Subtitle, IReadOnlyList<SubScoreRow> Rows, IReadOnlyList<KeyValuePair<string, string>> Info, string? Failure);
+public sealed record ModuleBlock(string Title, string Subtitle, IReadOnlyList<SubScoreRow> Rows, IReadOnlyList<KeyValuePair<string, string>> Info, string? Failure, IReadOnlyList<ModuleChart> Charts);
+/// <summary>A chart a test produced itself (surface scan, sustained-write curve…).</summary>
+public sealed record ModuleChart(string Title, string XUnit, string Unit, IReadOnlyList<ChartSeries> Series, string? Note)
+{
+    public static ModuleChart From(ChartData c)
+    {
+        var s = new ChartSeries(string.IsNullOrEmpty(c.YLabel) ? c.Unit : c.YLabel, Palette.Series[0], c.Unit);
+        s.Set(c.Points.Where(p => p.Length >= 2).Select(p => new System.Windows.Point(p[0], p[1])));
+        // "Position on disk (%)" → "%", "GB written" → "GB"
+        int a = c.XLabel.IndexOf('('), b = c.XLabel.IndexOf(')');
+        string unit = a >= 0 && b > a ? c.XLabel[(a + 1)..b] : c.XLabel.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+        return new ModuleChart(c.Title, unit, c.Unit, new[] { s }, c.Note);
+    }
+}
 public sealed record StepBlock(string Title, string Status, IReadOnlyList<ModuleBlock> Modules);
 
 public sealed partial class ChannelOption : ObservableObject
@@ -82,7 +95,8 @@ public sealed partial class ResultsViewModel : PageViewModel
                 double max = m.SubScores.Select(x => x.Score).DefaultIfEmpty(0).Max();
                 var rows = m.SubScores.Select(x => new SubScoreRow(x.Group, x.Name, $"{x.Value:#,0.##} {x.Unit}".Trim(), x.Score > 0 ? Score.Format(x.Score) : "", max > 0 ? x.Score / max : 0, x.Detail)).ToList();
                 return new ModuleBlock($"{m.Component.Display()}{(m.Score is double sc ? $" — {Score.Format(sc)} points" : "")}",
-                    m.ErrorCount > 0 ? $"{m.ErrorCount} errors" : m.Failed ? "Failed" : "OK", rows, m.Info.ToList(), m.Failed ? m.FailureReason : null);
+                    m.ErrorCount > 0 ? $"{m.ErrorCount} errors" : m.Failed ? "Failed" : "OK", rows, m.Info.ToList(), m.Failed ? m.FailureReason : null,
+                    m.Charts.Select(ModuleChart.From).ToList());
             }).ToList();
             Details.Add(new StepBlock($"{s.Name} · {(s.Kind == StepKind.Benchmark ? "benchmark" : "stress")} · {TimeFormat.Short(TimeSpan.FromSeconds(s.PlannedSeconds))}", s.Status, mods));
         }

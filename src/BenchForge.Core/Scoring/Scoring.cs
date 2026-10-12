@@ -58,8 +58,11 @@ public static class ScoreReferences
     public const double DiskSeqWrite = 480;
     public const double Disk4kReadQ1 = 40;
     public const double Disk4kWriteQ1 = 100;
-    public const double Disk4kReadMT = 320;
+    public const double Disk4kReadMT = 320;   // 4K Q32
     public const double Disk4kWriteMT = 260;
+    public const double Disk4kReadQ32T4 = 380;
+    public const double DiskMixed = 220;      // 70/30 4K Q8
+    public const double DiskSmallFiles = 1200; // files/s created + read + deleted
 
     // GPU: average FPS at the fixed 1920×1080 internal resolution that a GTX 1060-class card is estimated to reach
     // (derived from each scene's triangle / shader / bandwidth cost). Scores stay linear: 2× the FPS = 2× the points.

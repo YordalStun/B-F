@@ -29,6 +29,9 @@ public sealed class HardwareInventory
     public int? CrashDumpSetting { get; set; }
     public bool? FastStartupEnabled { get; set; }
     public int? TdrDelaySeconds { get; set; }
+    /// <summary>TRIM enabled for NTFS (fsutil DisableDeleteNotify = 0).</summary>
+    public bool? TrimEnabled { get; set; }
+    public List<PcieLink> PcieLinks { get; set; } = new();
     public List<string> Notes { get; set; } = new();
 }
 
@@ -80,4 +83,39 @@ public sealed class DiskInfo
     public long? WriteErrors { get; set; }
     public List<string> Volumes { get; set; } = new();
     public double? FreePercent { get; set; }
+    public int? DiskNumber { get; set; }
+    /// <summary>SATA SMART attributes (empty for NVMe / USB).</summary>
+    public List<SmartAttribute> Smart { get; set; } = new();
+    public NvmeHealthInfo? Nvme { get; set; }
+    /// <summary>A partition does not start on a 4 KB boundary (slows SSDs).</summary>
+    public bool? Misaligned { get; set; }
+}
+
+public sealed record SmartAttribute(int Id, string Name, int Current, int Worst, int? Threshold, long Raw)
+{
+    public bool Failing => Threshold is int t && t > 0 && Current <= t;
+}
+
+public sealed class NvmeHealthInfo
+{
+    public int CriticalWarning { get; set; }
+    public int TemperatureC { get; set; }
+    public int AvailableSparePercent { get; set; }
+    public int SpareThresholdPercent { get; set; }
+    /// <summary>Wear: 100 % = rated endurance reached (can go above 100).</summary>
+    public int PercentageUsed { get; set; }
+    public double DataReadTB { get; set; }
+    public double DataWrittenTB { get; set; }
+    public long PowerCycles { get; set; }
+    public long PowerOnHours { get; set; }
+    public long UnsafeShutdowns { get; set; }
+    public long MediaErrors { get; set; }
+    public long ErrorLogEntries { get; set; }
+}
+
+/// <summary>Negotiated vs maximum PCI Express link of a device (NVMe controller, graphics card).</summary>
+public sealed record PcieLink(string Device, string Kind, int CurrentGen, int CurrentWidth, int MaxGen, int MaxWidth)
+{
+    public bool Degraded => CurrentGen > 0 && MaxGen > 0 && (CurrentGen < MaxGen || CurrentWidth < MaxWidth);
+    public override string ToString() => $"PCIe {CurrentGen}.0 ×{CurrentWidth} (supports {MaxGen}.0 ×{MaxWidth})";
 }

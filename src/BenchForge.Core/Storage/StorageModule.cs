@@ -29,7 +29,15 @@ public sealed unsafe class StorageModule : ITestModule
     private ModuleResult Run(StepContext ctx)
     {
         var result = new ModuleResult { Component = Component.Storage, Kind = ctx.Kind };
-        var target = string.IsNullOrWhiteSpace(ctx.Settings.StorageTarget) ? DefaultTarget() : ctx.Settings.StorageTarget;
+        var target = !string.IsNullOrWhiteSpace(ctx.Step.Target) ? ctx.Step.Target
+                   : string.IsNullOrWhiteSpace(ctx.Settings.StorageTarget) ? DefaultTarget() : ctx.Settings.StorageTarget;
+        if (ctx.Step.Variant == StepVariants.DriveHealth)
+        {
+            result.Info["Target"] = target;
+            DriveHealth.Run(ctx, target, result);
+            ctx.Progress("Done", 1);
+            return result;
+        }
         string dir = Path.Combine(target, "BenchForgeTemp");
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, $"bf-{Guid.NewGuid():N}.tmp");
@@ -46,12 +54,12 @@ public sealed unsafe class StorageModule : ITestModule
         SafeFileHandle handle;
         try
         {
-            handle = File.OpenHandle(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, FileOptions.WriteThrough | NoBuffering | FileOptions.DeleteOnClose);
+            handle = File.OpenHandle(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, FileOptions.WriteThrough | NoBuffering | FileOptions.DeleteOnClose | FileOptions.Asynchronous);
         }
         catch (Exception)
         {
             unbuffered = false; // e.g. file systems that don't support direct I/O
-            handle = File.OpenHandle(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, FileOptions.WriteThrough | FileOptions.DeleteOnClose);
+            handle = File.OpenHandle(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, FileOptions.WriteThrough | FileOptions.DeleteOnClose | FileOptions.Asynchronous);
         }
         result.Info["Cache bypass"] = unbuffered ? "Yes (unbuffered I/O)" : "No (file system does not support it — results include OS cache)";
 
@@ -59,7 +67,7 @@ public sealed unsafe class StorageModule : ITestModule
         {
             try
             {
-                if (ctx.Kind == StepKind.Benchmark) Benchmark(ctx, handle, fileSize, result);
+                if (ctx.Kind == StepKind.Benchmark) Benchmark(ctx, handle, fileSize, result, dir);
                 else Stress(ctx, handle, fileSize, result);
             }
             finally
@@ -73,40 +81,99 @@ public sealed unsafe class StorageModule : ITestModule
         return result;
     }
 
-    private void Benchmark(StepContext ctx, SafeFileHandle h, long fileSize, ModuleResult result)
+    private void Benchmark(StepContext ctx, SafeFileHandle h, long fileSize, ModuleResult result, string dir)
     {
-        double phase = Math.Max(1, (ctx.DurationSeconds - 2) / 6.0);
-        int threads = Math.Clamp(Environment.ProcessorCount, 4, 8);
+        // Phases (time-boxed so the total step length — and the ETA — stay exact).
+        var phases = new (string Name, double Weight)[]
+        {
+            ("Sequential write 1 MB Q8", 1.2), ("Sequential read 1 MB Q8 + verify", 1), ("4K random read Q1", 1), ("4K random read Q32", 1),
+            ("4K random read Q32 × 4 threads", 0.8), ("4K random write Q1", 1), ("4K random write Q32", 1), ("Mixed 70/30 4K Q8", 1), ("Small files", 1),
+        };
+        double unit = Math.Max(0.8, (ctx.DurationSeconds - 3) / phases.Sum(p => p.Weight));
+        int pi = 0;
+        double Phase(out string name) { name = phases[pi].Name; ctx.Progress(name, pi / (double)phases.Length); return phases[pi++].Weight * unit; }
+        void Live(double mbs) => ctx.Metric("disk.speed", "Drive test speed", Math.Round(mbs, 1), "MB/s");
+        QueuedResult Q(QueuedTest t, long area) => QueuedIo.RunAsync(h, area, t, ctx.Token, Live).GetAwaiter().GetResult();
+
         var hashes = new ulong[fileSize / SeqBlock];
-
-        ctx.Progress("Sequential write (1 MB blocks)", 0);
-        var (seqW, written) = Sequential(ctx, h, fileSize, phase, write: true, hashes, verify: false, out _);
-        long usable = Math.Max(SeqBlock, written / SeqBlock * SeqBlock);
+        var seqW = Q(new QueuedTest { BlockSize = SeqBlock, QueueDepth = 8, Sequential = true, ReadFraction = 0, Seconds = Phase(out _), SinglePass = true, Hashes = hashes }, fileSize);
+        long usable = Math.Max(SeqBlock, seqW.Bytes / SeqBlock * SeqBlock);
         result.Info["Area tested"] = $"{usable >> 20} MB";
-        ctx.Progress("Sequential read + verify", 1 / 6.0);
-        var (seqR, _) = Sequential(ctx, h, usable, phase, write: false, hashes, verify: true, out int mismatches);
-        ctx.Progress("Random 4K read, 1 thread", 2 / 6.0);
-        double r4q1 = Random4K(ctx, h, usable, phase, 1, write: false);
-        ctx.Progress($"Random 4K read, {threads} threads", 3 / 6.0);
-        double r4mt = Random4K(ctx, h, usable, phase, threads, write: false);
-        ctx.Progress("Random 4K write, 1 thread", 4 / 6.0);
-        double w4q1 = Random4K(ctx, h, usable, phase, 1, write: true);
-        ctx.Progress($"Random 4K write, {threads} threads", 5 / 6.0);
-        double w4mt = Random4K(ctx, h, usable, phase, threads, write: true);
+        var seqR = Q(new QueuedTest { BlockSize = SeqBlock, QueueDepth = 8, Sequential = true, Seconds = Phase(out _), SinglePass = true, Hashes = hashes }, usable);
+        var r4q1 = Q(new QueuedTest { Seconds = Phase(out _), Latency = true }, usable);
+        var r4q32 = Q(new QueuedTest { QueueDepth = 32, Seconds = Phase(out _) }, usable);
+        var r4q32t4 = Q(new QueuedTest { QueueDepth = 32, Threads = 4, Seconds = Phase(out _) }, usable);
+        var w4q1 = Q(new QueuedTest { ReadFraction = 0, Seconds = Phase(out _), Latency = true }, usable);
+        var w4q32 = Q(new QueuedTest { ReadFraction = 0, QueueDepth = 32, Seconds = Phase(out _) }, usable);
+        var mixed = Q(new QueuedTest { ReadFraction = 0.7, QueueDepth = 8, Seconds = Phase(out _) }, usable);
+        double files = SmallFiles(ctx, dir, Phase(out _));
 
-        void Add(string group, string name, double v, double reference, string? detail = null) =>
-            result.SubScores.Add(new SubScore { Name = name, Group = group, Value = Math.Round(v, 1), Unit = "MB/s", Score = Math.Round(Score.Linear(v, reference)), Detail = detail });
-        Add("Sequential", "Sequential read", seqR, ScoreReferences.DiskSeqRead);
-        Add("Sequential", "Sequential write", seqW, ScoreReferences.DiskSeqWrite);
-        Add("Random 4K", "4K random read (1 thread)", r4q1, ScoreReferences.Disk4kReadQ1, $"{r4q1 * 1e6 / RandBlock:0} IOPS");
-        Add("Random 4K", "4K random write (1 thread)", w4q1, ScoreReferences.Disk4kWriteQ1, $"{w4q1 * 1e6 / RandBlock:0} IOPS");
-        Add("Random 4K", $"4K random read ({threads} threads)", r4mt, ScoreReferences.Disk4kReadMT, $"{r4mt * 1e6 / RandBlock:0} IOPS");
-        Add("Random 4K", $"4K random write ({threads} threads)", w4mt, ScoreReferences.Disk4kWriteMT, $"{w4mt * 1e6 / RandBlock:0} IOPS");
+        void Add(string group, string name, double v, double reference, string unitText = "MB/s", string? detail = null) =>
+            result.SubScores.Add(new SubScore { Name = name, Group = group, Value = Math.Round(v, 1), Unit = unitText, Score = Math.Round(Score.Linear(v, reference)), Detail = detail });
+        string Iops(double mbs, int block = RandBlock) => $"{mbs * 1e6 / block:N0} IOPS";
+        Add("Sequential", "Sequential read (1 MB, Q8)", seqR.MBs, ScoreReferences.DiskSeqRead);
+        Add("Sequential", "Sequential write (1 MB, Q8)", seqW.MBs, ScoreReferences.DiskSeqWrite);
+        Add("Random 4K", "4K random read (Q1)", r4q1.MBs, ScoreReferences.Disk4kReadQ1, detail: $"{Iops(r4q1.MBs)} · latency {r4q1.Latency}");
+        Add("Random 4K", "4K random write (Q1)", w4q1.MBs, ScoreReferences.Disk4kWriteQ1, detail: $"{Iops(w4q1.MBs)} · latency {w4q1.Latency}");
+        Add("Random 4K", "4K random read (Q32)", r4q32.MBs, ScoreReferences.Disk4kReadMT, detail: Iops(r4q32.MBs));
+        Add("Random 4K", "4K random write (Q32)", w4q32.MBs, ScoreReferences.Disk4kWriteMT, detail: Iops(w4q32.MBs));
+        Add("Random 4K", "4K random read (Q32 × 4 threads)", r4q32t4.MBs, ScoreReferences.Disk4kReadQ32T4, detail: Iops(r4q32t4.MBs));
+        Add("Real world", "Mixed 70% read / 30% write (4K, Q8)", mixed.MBs, ScoreReferences.DiskMixed, detail: Iops(mixed.MBs));
+        if (files > 0) Add("Real world", "Small files (create / read / delete)", files, ScoreReferences.DiskSmallFiles, "files/s");
 
+        if (r4q1.Latency is LatencyStats rl)
+        {
+            result.Info["4K read latency"] = rl.ToString();
+            result.SubScores.Add(new SubScore { Name = "Read stalls over 50 ms", Group = "Latency", Value = rl.Stalls, HigherIsBetter = false, Detail = $"99.9% of reads finished within {LatencyStats.Format(rl.P999Us)}" });
+        }
+        if (w4q1.Latency is LatencyStats wl)
+        {
+            result.Info["4K write latency"] = wl.ToString();
+            result.SubScores.Add(new SubScore { Name = "Write stalls over 50 ms", Group = "Latency", Value = wl.Stalls, HigherIsBetter = false, Detail = $"99.9% of writes finished within {LatencyStats.Format(wl.P999Us)}" });
+        }
+
+        int mismatches = seqR.Mismatches;
         result.ErrorCount += mismatches;
-        result.Info["Data integrity"] = mismatches == 0 ? $"OK — {usable >> 20} MB verified" : $"{mismatches} corrupted 1 MB blocks!";
+        if (mismatches > 0) ctx.Error(new TestError { Test = "Storage verify", Message = $"{mismatches} corrupted 1 MB blocks read back" });
+        result.Info["Data integrity"] = mismatches == 0 ? $"OK — {seqR.Bytes >> 20} MB verified" : $"{mismatches} corrupted 1 MB blocks!";
         if (!ctx.Token.IsCancellationRequested)
-            result.Score = Math.Round(Score.GeoMean(result.SubScores.Select(s => s.Score)));
+            result.Score = Math.Round(Score.GeoMean(result.SubScores.Where(s => s.Score > 0).Select(s => s.Score)));
+    }
+
+    /// <summary>Creates, writes, reads back and deletes many small files (4–64 KB) — what copying a folder of documents feels like.</summary>
+    private static double SmallFiles(StepContext ctx, string dir, double seconds)
+    {
+        var folder = Path.Combine(dir, "small-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(folder);
+        var rng = new Random(5);
+        var data = new byte[64 * 1024];
+        rng.NextBytes(data);
+        long count = 0;
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            while (sw.Elapsed.TotalSeconds < seconds && !ctx.Token.IsCancellationRequested)
+            {
+                var batch = new List<string>(100);
+                for (int i = 0; i < 100; i++)
+                {
+                    var f = Path.Combine(folder, $"f{count + i}.bin");
+                    int size = 4096 * rng.Next(1, 17);
+                    using (var fs = new FileStream(f, FileMode.Create, FileAccess.Write, FileShare.None, 4096))
+                    {
+                        fs.Write(data, 0, size);
+                        fs.Flush(true);
+                    }
+                    batch.Add(f);
+                }
+                foreach (var f in batch) { if (File.ReadAllBytes(f).Length == 0) throw new IOException("Empty read"); }
+                foreach (var f in batch) File.Delete(f);
+                count += batch.Count;
+            }
+        }
+        catch (Exception ex) { ctx.Log("Small-files test stopped: " + ex.Message, Severity.Warning); }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+        return count / Math.Max(0.001, sw.Elapsed.TotalSeconds);
     }
 
     private void Stress(StepContext ctx, SafeFileHandle h, long fileSize, ModuleResult result)
@@ -179,35 +246,6 @@ public sealed unsafe class StorageModule : ITestModule
         mismatches = bad;
         // If the whole file was processed quickly, time is shorter than the slot: that's fine, rate is still bytes/time.
         return (done / 1e6 / Math.Max(1e-6, elapsed), done);
-    }
-
-    private static double Random4K(StepContext ctx, SafeFileHandle h, long size, double seconds, int threads, bool write)
-    {
-        long blocks = size / RandBlock;
-        long done = 0;
-        var stopAt = Stopwatch.GetTimestamp() + (long)(seconds * Stopwatch.Frequency);
-        long start = Stopwatch.GetTimestamp();
-        var workers = Enumerable.Range(0, threads).Select(t => new Thread(() =>
-        {
-            byte* buf = (byte*)NativeMemory.AlignedAlloc(RandBlock, 4096);
-            try
-            {
-                var span = new Span<byte>(buf, RandBlock);
-                FillBlock(buf, RandBlock, (ulong)t + 99);
-                var rng = new Random(1234 + t);
-                while (Stopwatch.GetTimestamp() < stopAt && !ctx.Token.IsCancellationRequested)
-                {
-                    long off = rng.NextInt64(blocks) * RandBlock;
-                    if (write) RandomAccess.Write(h, span, off); else RandomAccess.Read(h, span, off);
-                    Interlocked.Add(ref done, RandBlock);
-                }
-            }
-            finally { NativeMemory.AlignedFree(buf); }
-        }) { IsBackground = true }).ToList();
-        workers.ForEach(w => w.Start());
-        ReportWhileRunning(ctx, workers, () => Interlocked.Read(ref done), write ? "Drive 4K write" : "Drive 4K read");
-        double elapsed = (Stopwatch.GetTimestamp() - start) / (double)Stopwatch.Frequency;
-        return done / 1e6 / Math.Max(1e-6, elapsed);
     }
 
     private static void ReportWhileRunning(StepContext ctx, List<Thread> workers, Func<long> bytes, string name)
