@@ -1,0 +1,107 @@
+<Window x:Class="BenchForge.App.Views.AlignWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Partition alignment" Height="760" Width="900" MinWidth="520" MinHeight="420" Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
+        FontFamily="{StaticResource UiFont}" WindowStartupLocation="CenterOwner" Icon="/Assets/benchforge.ico">
+    <DockPanel Margin="20">
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="Partition alignment" Style="{StaticResource H1}" FontSize="21" />
+            <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,4,0,12"
+                       Text="SSDs write in 4 KB pages. A partition that starts between two pages makes every small write touch both — slower and more wear. Pick a partition to see what can be done." />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="RefreshButton" Content="Check again" Click="Refresh_Click" Margin="0,0,8,0" />
+            <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0" IsEnabled="False" />
+            <Button x:Name="CloseButton" Content="Close" Click="Close_Click" />
+        </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <!-- Unfinished fix from an earlier run -->
+                <Border x:Name="ResumePanel" Visibility="Collapsed" Background="#26FF5A5A" BorderBrush="{StaticResource Bad}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
+                    <StackPanel>
+                        <TextBlock Text="An earlier alignment did not finish" FontWeight="SemiBold" />
+                        <TextBlock x:Name="ResumeText" TextWrapping="Wrap" Margin="0,4,0,8" />
+                        <WrapPanel>
+                            <Button x:Name="ResumeButton" Content="Finish restoring" Style="{StaticResource PrimaryButton}" Click="Resume_Click" Margin="0,0,8,6" />
+                            <Button Content="Open the backup folder" Click="OpenBackup_Click" Margin="0,0,8,6" />
+                            <Button Content="Open Disk Management" Click="DiskMgmt_Click" Margin="0,0,8,6" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock x:Name="AdminWarning" Visibility="Collapsed" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Margin="0,0,0,8"
+                           Text="BenchForge is not running as administrator — it can show the partitions but can't fix them. Restart it with 'Run as administrator'." />
+
+                <ListBox x:Name="PartitionList" SelectionChanged="PartitionList_SelectionChanged" MaxHeight="260" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="2,4">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="150" /><ColumnDefinition Width="*" /><ColumnDefinition Width="140" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Sub}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="10,0">
+                                    <TextBlock Text="{Binding Disk}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Start}" Style="{StaticResource Label}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Right" TextWrapping="Wrap" TextAlignment="Right" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- Already aligned / nothing selected -->
+                <Border x:Name="InfoPanel" Style="{StaticResource Card}" Margin="0,12,0,0">
+                    <TextBlock x:Name="InfoText" TextWrapping="Wrap" Text="Select a partition above." />
+                </Border>
+
+                <!-- BenchForge can fix it -->
+                <Border x:Name="AutoPanel" Style="{StaticResource Card}" Margin="0,12,0,0" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock x:Name="AutoTitle" Style="{StaticResource H2}" />
+                        <TextBlock x:Name="AutoText" TextWrapping="Wrap" Margin="0,0,0,10" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Temporary copy on" VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <ComboBox x:Name="BackupCombo" Width="300" DisplayMemberPath="Text" SelectionChanged="BackupCombo_SelectionChanged" />
+                        </StackPanel>
+                        <TextBlock x:Name="BackupWarning" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,10" />
+                        <Button x:Name="FixButton" Style="{StaticResource PrimaryButton}" Click="Fix_Click" HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Windows partition and others: guided -->
+                <Border x:Name="GuidePanel" Style="{StaticResource Card}" Margin="0,12,0,0" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock x:Name="GuideTitle" Style="{StaticResource H2}" />
+                        <TextBlock x:Name="GuideReason" TextWrapping="Wrap" Foreground="{StaticResource Warn}" Margin="0,0,0,10" />
+                        <TextBlock TextWrapping="Wrap" LineHeight="21">
+                            <Run FontWeight="SemiBold" Text="1. Back up" /><Run Text=" your important files first — aligning moves the data on the disk." /><LineBreak />
+                            <Run FontWeight="SemiBold" Text="2. Install a free partition tool:" /><Run Text=" MiniTool Partition Wizard Free or AOMEI Partition Assistant Standard (buttons below)." /><LineBreak />
+                            <Run FontWeight="SemiBold" Text="3. Align:" /><Run Text=" right-click the partition › 'Align' (AOMEI: 'Partition Alignment', choose 4096) › Apply." /><LineBreak />
+                            <Run FontWeight="SemiBold" Text="4. Let it restart:" /><Run Text=" for the Windows partition the tool restarts and works before Windows loads — 10–60 minutes. Do not turn the PC off." /><LineBreak />
+                            <Run FontWeight="SemiBold" Text="5. Come back here" /><Run Text=" and press 'Check again'. BenchForge confirms it is aligned and re-TRIMs the SSD." />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,10"
+                                   Text="Other ways: a clean Windows install on the SSD, or re-clone with Macrium Reflect / Clonezilla — both align automatically." />
+                        <WrapPanel>
+                            <Button Content="MiniTool Partition Wizard" Click="MiniTool_Click" Margin="0,0,8,6" />
+                            <Button Content="AOMEI Partition Assistant" Click="Aomei_Click" Margin="0,0,8,6" />
+                            <Button Content="Check in System Information" Click="MsInfo_Click" Margin="0,0,8,6" ToolTip="Components › Storage › Disks › Partition Starting Offset — divide by 4096; a whole number means aligned" />
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Progress -->
+                <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                    <TextBlock x:Name="StatusText" FontWeight="SemiBold" Margin="0,0,0,6" />
+                    <ProgressBar x:Name="Progress" Maximum="1" Height="12" />
+                    <TextBox x:Name="Output" IsReadOnly="True" TextWrapping="Wrap" Height="230" Margin="0,10,0,0" VerticalScrollBarVisibility="Auto"
+                             FontFamily="{StaticResource MonoFont}" FontSize="12" Background="{StaticResource Panel}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

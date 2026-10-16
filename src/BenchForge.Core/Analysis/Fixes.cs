@@ -13,6 +13,7 @@ public enum FixId
     CleanTempFiles,
     EnableTrim,
     RetrimSsd,
+    AlignPartitions,
 }
 
 public sealed record FixInfo(FixId Id, string Title, string WhatItDoes, bool NeedsRestart, string HowToUndo);
@@ -41,6 +42,8 @@ public static class Fixes
             "Runs 'fsutil behavior set DisableDeleteNotify 0' so Windows tells SSDs which blocks are free.", false, "fsutil behavior set DisableDeleteNotify 1"),
         [FixId.RetrimSsd] = new(FixId.RetrimSsd, "Optimise (re-TRIM) the system SSD",
             "Runs Windows' 'Optimize Drives' retrim on the system SSD (defrag C: /L). Safe, takes a minute.", false, "Nothing to undo."),
+        [FixId.AlignPartitions] = new(FixId.AlignPartitions, "Fix partition alignment",
+            "Opens the alignment tool. Data partitions (D:, E: …) are fixed automatically: files are copied to another drive and checked, the partition is recreated aligned, and the files are copied back and checked again. For the Windows partition it guides you through a free partition tool.", false, "Nothing to undo — your files and drive letters stay the same."),
     };
 
     public static FixInfo Get(FixId id) => All[id];

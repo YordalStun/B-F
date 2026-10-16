@@ -745,6 +745,197 @@ public class DriveTests
         Assert.Contains("32,256 bytes", f.Detail);
         var rec = Assert.Single(r.Recommendations, x => x.Title == "Align the SSD partition");
         Assert.Contains(rec.Actions, a => a.Contains("msinfo32"));
-        Assert.Contains(FixId.RetrimSsd, rec.Fixes);
+        Assert.Contains(FixId.AlignPartitions, rec.Fixes);
+    }
+}
+
+public class PartitionAlignTests
+{
+    private static Storage.PartitionEntry DataPart(long offset = 32256, long size = 100L << 30) => new()
+    {
+        DiskNumber = 1, PartitionNumber = 2, DriveLetter = 'D', Offset = offset, Size = size, UsedBytes = 10L << 30,
+        FileSystem = "NTFS", Label = "Games", PartitionStyle = "GPT", GptType = Storage.PartitionAlign.GptBasicData, Encrypted = false, MediaType = "SSD",
+    };
+
+    [Fact]
+    public void New_layout_is_aligned_and_fits_inside_the_old_partition()
+    {
+        foreach (var (off, size) in new[] { (32256L, 100L << 30), (1048576L + 512, 5L << 30), (65536L * 3 + 7, (1L << 30) + 12345) })
+        {
+            var (o, s) = Storage.PartitionAlign.NewLayout(off, size);
+            Assert.Equal(0, o % (1 << 20));
+            Assert.True(o >= off);
+            Assert.True(o + s <= off + size);
+            Assert.True(off + size - (o + s) < 2L << 20); // loses less than 2 MB
+        }
+    }
+
+    [Fact]
+    public void Only_safe_partitions_are_fixed_automatically()
+    {
+        Assert.True(Storage.PartitionAlign.Check(DataPart(), @"E:\BenchForge\", @"C:\Windows").CanAutoFix);
+        Assert.False(Storage.PartitionAlign.Check(DataPart(1048576)).CanAutoFix);                                   // already aligned
+        var c = DataPart(); c.DriveLetter = 'C';
+        Assert.Contains("Windows partition", Storage.PartitionAlign.Check(c, null, @"C:\Windows").Reason);
+        var boot = DataPart(); boot.IsBoot = true;
+        Assert.False(Storage.PartitionAlign.Check(boot).CanAutoFix);
+        var app = DataPart();
+        Assert.Contains("runs from this drive", Storage.PartitionAlign.Check(app, @"D:\Tools\BenchForge\").Reason);
+        var bl = DataPart(); bl.Encrypted = true;
+        Assert.Contains("BitLocker", Storage.PartitionAlign.Check(bl).Reason);
+        var unknown = DataPart(); unknown.Encrypted = null;
+        Assert.False(Storage.PartitionAlign.Check(unknown).CanAutoFix);
+        var pf = DataPart(); pf.HasPageFile = true;
+        Assert.Contains("page file", Storage.PartitionAlign.Check(pf).Reason);
+        var recovery = DataPart(); recovery.GptType = "{de94bba4-06d1-4d40-a16a-bfd50179d6ac}";
+        Assert.False(Storage.PartitionAlign.Check(recovery).CanAutoFix);
+        var logical = DataPart(); logical.PartitionStyle = "MBR"; logical.MbrType = 7; logical.IsLogical = true;
+        Assert.False(Storage.PartitionAlign.Check(logical).CanAutoFix);
+        var refs = DataPart(); refs.FileSystem = "ReFS";
+        Assert.False(Storage.PartitionAlign.Check(refs).CanAutoFix);
+        var bigFat = DataPart(); bigFat.FileSystem = "FAT32";
+        Assert.Contains("32 GB", Storage.PartitionAlign.Check(bigFat).Reason);
+        var full = DataPart(size: 10L << 30); full.UsedBytes = (10L << 30) - (100L << 20);
+        Assert.Contains("too full", Storage.PartitionAlign.Check(full).Reason);
+    }
+
+    [Fact]
+    public void Backup_target_needs_room_and_prefers_another_disk()
+    {
+        var p = DataPart();
+        var vols = new[]
+        {
+            new Storage.BackupVolume('D', "NTFS", 900L << 30, 1, "self"),
+            new Storage.BackupVolume('E', "NTFS", 500L << 30, 1, "same disk"),
+            new Storage.BackupVolume('F', "NTFS", 200L << 30, 2, "other disk"),
+            new Storage.BackupVolume('G', "FAT32", 900L << 30, 3, "fat"),
+            new Storage.BackupVolume('H', "exFAT", 5L << 30, 4, "too small"),
+        };
+        var t = Storage.PartitionAlign.BackupTargets(p, vols);
+        Assert.Equal(new[] { 'F', 'E' }, t.Select(x => x.Letter));
+    }
+
+    [Fact]
+    public void Recreate_script_keeps_letter_type_and_label()
+    {
+        var p = DataPart(); p.Label = "Bob's games";
+        var s = Storage.PartitionAlign.RecreateScript(p);
+        var (o, size) = Storage.PartitionAlign.NewLayout(p.Offset, p.Size);
+        Assert.Contains("Remove-Partition -DiskNumber 1 -PartitionNumber 2", s);
+        Assert.Contains($"-Offset {o} -Size {size} -DriveLetter D -GptType '{Storage.PartitionAlign.GptBasicData}'", s);
+        Assert.Contains("-FileSystem NTFS -NewFileSystemLabel 'Bob''s games'", s);
+        var mbr = DataPart(); mbr.PartitionStyle = "MBR"; mbr.MbrType = 0x0B; mbr.FileSystem = "FAT32";
+        Assert.Contains("-MbrType 12", Storage.PartitionAlign.RecreateScript(mbr));
+        Assert.Contains("-FileSystem FAT32", Storage.PartitionAlign.RecreateScript(mbr));
+    }
+
+    private sealed class FakeOps : Storage.IAlignOps
+    {
+        public string Drive = "";
+        public bool FailRecreate, CorruptCopy;
+        public int Recreated;
+        public Task<bool> CopyTree(string from, string to, Action<string> log, CancellationToken ct)
+        {
+            foreach (var f in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            {
+                var dst = Path.Combine(to, Path.GetRelativePath(from, f));
+                Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                File.Copy(f, dst, true);
+                if (CorruptCopy) { File.AppendAllText(dst, "x"); CorruptCopy = false; }
+            }
+            return Task.FromResult(true);
+        }
+        public Task<long?> Recreate(Storage.PartitionEntry p, Action<string> log)
+        {
+            if (FailRecreate) { Directory.Delete(Drive, true); return Task.FromResult<long?>(null); }
+            Recreated++;
+            Directory.Delete(Drive, true); Directory.CreateDirectory(Drive); // formatted = empty
+            return Task.FromResult<long?>(Storage.PartitionAlign.NewLayout(p.Offset, p.Size).Offset);
+        }
+        public Task<bool> WaitForDrive(char letter, TimeSpan timeout) => Task.FromResult(Directory.Exists(Drive));
+    }
+
+    private static (string Root, string Drive, string Backup) Setup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bf-align-" + Guid.NewGuid().ToString("N"));
+        var drive = Path.Combine(root, "drive");
+        Directory.CreateDirectory(Path.Combine(drive, "Photos", "2024"));
+        File.WriteAllText(Path.Combine(drive, "notes.txt"), "hello");
+        File.WriteAllBytes(Path.Combine(drive, "Photos", "2024", "big.bin"), Enumerable.Range(0, 3_000_000).Select(i => (byte)(i * 31)).ToArray());
+        Directory.CreateDirectory(Path.Combine(drive, "System Volume Information"));
+        File.WriteAllText(Path.Combine(drive, "System Volume Information", "tracking.log"), "windows");
+        Persistence.DataPaths.Override(Path.Combine(root, "data"));
+        return (root, drive, Path.Combine(root, "backup"));
+    }
+
+    private static Task<bool> Yes(string _) => Task.FromResult(true);
+
+    [Fact]
+    public async Task Full_fix_restores_identical_files_and_removes_the_copy()
+    {
+        var (root, drive, backup) = Setup();
+        var before = Storage.FileManifest.Build(drive);
+        Assert.Equal(2, before.Count); // System Volume Information is skipped
+        var ops = new FakeOps { Drive = drive };
+        var log = new List<string>();
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.True(ok, string.Join("\n", log));
+        Assert.Equal(1, ops.Recreated);
+        Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+        Assert.False(Directory.Exists(backup));
+        Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Bad_copy_never_touches_the_partition()
+    {
+        var (root, drive, backup) = Setup();
+        var ops = new FakeOps { Drive = drive, CorruptCopy = true };
+        var log = new List<string>();
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.True(File.Exists(Path.Combine(drive, "notes.txt")));
+        Assert.Contains(log, l => l.Contains("not identical"));
+        Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Saying_no_at_the_last_question_changes_nothing()
+    {
+        var (root, drive, backup) = Setup();
+        var ops = new FakeOps { Drive = drive };
+        bool ok = await new Storage.PartitionAligner(ops, _ => { }, (_, _) => { }).RunAsync(DataPart(), drive, backup, _ => Task.FromResult(false), Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.False(Directory.Exists(backup));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Failed_recreate_keeps_the_copy_and_can_be_finished_later()
+    {
+        var (root, drive, backup) = Setup();
+        var before = Storage.FileManifest.Build(drive);
+        var ops = new FakeOps { Drive = drive, FailRecreate = true };
+        var log = new List<string>();
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Contains(log, l => l.Contains("YOUR FILES ARE SAFE"));
+        var job = Storage.AlignJob.Load();
+        Assert.NotNull(job);
+        Assert.True(job!.DataOnlyInBackup);
+        Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(backup)));
+
+        // The user recreates the volume in Disk Management, then presses "Finish restoring".
+        Directory.CreateDirectory(drive);
+        ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RestoreAsync(job, null, drive, _ => Task.FromResult(false));
+        Assert.True(ok);
+        Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+        Assert.True(Directory.Exists(backup)); // user chose to keep it
+        Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
     }
 }

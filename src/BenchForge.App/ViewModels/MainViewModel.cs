@@ -90,6 +90,14 @@ public sealed partial class MainViewModel : ObservableObject
         S.Start();
         History.Refresh();
         Task.Run(() => RecoverCrashes(args.Contains("--after-crash")));
+        // A partition alignment was interrupted after the partition was deleted: the files are only in the temporary copy.
+        if (Core.Storage.AlignJob.Load() is { DataOnlyInBackup: true } job)
+            Ui.Post(() =>
+            {
+                if (MessageBox.Show($"Fixing the alignment of {job.Letter}: did not finish.\n\nYour files are safe in:\n{job.BackupFolder}\n\nOpen the alignment tool to finish restoring them?",
+                        "BenchForge", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    OpenAlignment();
+            });
     }
 
     /// <summary>Looks for test sessions that never finished: that means the PC (or BenchForge) went down mid-test.</summary>
@@ -161,10 +169,15 @@ public sealed partial class MainViewModel : ObservableObject
     private void RunFix(Core.Analysis.FixInfo? fix)
     {
         if (fix == null) return;
+        // Has its own window with its own confirmations.
+        if (fix.Id == Core.Analysis.FixId.AlignPartitions) { OpenAlignment(); return; }
         var msg = $"{fix.Title}\n\n{fix.WhatItDoes}\n\n{(fix.NeedsRestart ? "A restart is needed afterwards.\n\n" : "")}To undo: {fix.HowToUndo}\n\nGo ahead?";
         if (MessageBox.Show(msg, "BenchForge fix", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         new Views.FixWindow(fix) { Owner = Application.Current.MainWindow }.Show();
     }
+
+    [RelayCommand]
+    public void OpenAlignment() => new Views.AlignWindow(S.Inventory) { Owner = Application.Current.MainWindow }.Show();
 
     [RelayCommand] private Task ExportEverythingForAi() => AiExportService.ExportEverything();
 

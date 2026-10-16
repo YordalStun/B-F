@@ -83,6 +83,10 @@ public static class FixRunner
                     return code == 0;
                 }
 
+                case FixId.AlignPartitions:
+                    output("Use the 'Partition alignment' window.");
+                    return false;
+
                 case FixId.CleanTempFiles:
                 {
                     long freed = 0; int count = 0;
@@ -117,7 +121,7 @@ public static class FixRunner
     public static Task<int> ScheduleSpotFix(Action<string> output) =>
         RunProcess("cmd.exe", "/c echo Y| chkdsk " + (Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\").TrimEnd('\\') + " /spotfix", output, CancellationToken.None, Encoding.UTF8);
 
-    private static async Task<int> RunProcess(string file, string args, Action<string> output, CancellationToken ct, Encoding enc)
+    internal static async Task<int> RunProcess(string file, string args, Action<string> output, CancellationToken ct, Encoding enc)
     {
         var psi = new ProcessStartInfo(file, args)
         {
