@@ -21,6 +21,7 @@ public static class RunAnalyzer
         PeripheralChecks(r.Hardware, f);
         NetworkDuringRun(r, f);
         FramePacing(r, f);
+        GpuTransferAndApis(r, f);
         r.Findings = f.OrderByDescending(x => x.Severity).ToList();
         r.Recommendations = RecommendationEngine.Build(r);
     }
@@ -312,7 +313,7 @@ public static class RunAnalyzer
                 });
         }
         DriveHealthFindings(hw, f);
-        var gpu = r.AllModules.FirstOrDefault(m => m.Component == Component.Gpu && m.Info.TryGetValue("Renderer", out var rend) && (rend.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase) || rend.Contains("Microsoft Basic", StringComparison.OrdinalIgnoreCase) || rend.Contains("GDI Generic", StringComparison.OrdinalIgnoreCase)));
+        var gpu = r.AllModules.FirstOrDefault(m => m.Component == Component.Gpu && m.Info.TryGetValue("Renderer", out var rend) && (rend.Contains("llvmpipe", StringComparison.OrdinalIgnoreCase) || rend.Contains("lavapipe", StringComparison.OrdinalIgnoreCase) || rend.Contains("Microsoft Basic", StringComparison.OrdinalIgnoreCase) || rend.Contains("SwiftShader", StringComparison.OrdinalIgnoreCase) || rend.Contains("GDI Generic", StringComparison.OrdinalIgnoreCase)));
         if (gpu != null)
             f.Add(new Finding { Severity = Severity.Critical, Component = Component.Gpu, Title = "3D test ran on a software renderer", Detail = $"Renderer was '{gpu.Info["Renderer"]}', not your graphics card. The GPU driver is missing or broken — install the latest driver from NVIDIA/AMD/Intel." });
         var intel = r.AllModules.FirstOrDefault(m => m.Component == Component.Gpu && m.Info.TryGetValue("Renderer", out var rend) && rend.Contains("Intel", StringComparison.OrdinalIgnoreCase));
@@ -429,6 +430,37 @@ public static class RunAnalyzer
                 f.Add(new Finding { Severity = Severity.Warning, Title = $"{t.LossPercent:0.#}% of network pings lost during the test ({t.Name.ToLowerInvariant()})", Detail = $"Average {t.AvgMs:0} ms, worst {t.MaxMs:0} ms." });
             else if (t.Name == "Router" && t.MaxMs > 200)
                 f.Add(new Finding { Severity = Severity.Info, Title = $"Ping to the router spiked to {t.MaxMs:0} ms during the test", Detail = $"Average {t.AvgMs:0} ms. Spikes under load point to Wi-Fi interference or the network driver being starved of CPU time." });
+        }
+    }
+
+    /// <summary>PCIe copy speed to the graphics card vs what its link should manage; and big gaps between graphics APIs.</summary>
+    private static void GpuTransferAndApis(RunResult r, List<Finding> f)
+    {
+        foreach (var m in r.AllModules.Where(m => m.Component == Component.Gpu))
+        {
+            var up = m.SubScores.FirstOrDefault(s => s.Name.StartsWith("PCIe upload"));
+            var link = r.Hardware?.PcieLinks.FirstOrDefault(l => l.Kind == "GPU");
+            if (up != null && link != null && link.MaxGen > 0)
+            {
+                double expected = Scoring.ScoreReferences.PcieGBs(link.MaxGen, link.MaxWidth);
+                if (expected > 0 && up.Value < expected * 0.5)
+                    f.Add(new Finding
+                    {
+                        Severity = Severity.Warning, Component = Component.Gpu, Title = $"Graphics card transfers only {up.Value:0.0} GB/s over PCIe",
+                        Detail = $"Its slot supports PCIe {link.MaxGen}.0 ×{link.MaxWidth} (about {expected:0.0} GB/s). Under load the link was {link}. Check the card is in the top x16 slot, any riser cable, and the PCIe setting in BIOS.",
+                    });
+            }
+            var apiScores = m.SubScores.Where(s => s.Group == "Graphics APIs" && s.Value > 0).ToList();
+            if (apiScores.Count > 1)
+            {
+                var best = apiScores.MaxBy(s => s.Value)!; var worst = apiScores.MinBy(s => s.Value)!;
+                if (worst.Value < best.Value * 0.5)
+                    f.Add(new Finding
+                    {
+                        Severity = Severity.Warning, Component = Component.Gpu, Title = $"{worst.Name.Replace(" score", "")} is far slower than {best.Name.Replace(" score", "")}",
+                        Detail = $"{worst.Value:0} vs {best.Value:0} points on the same scenes. A big gap usually means an old or broken driver for that API — reinstall the latest graphics driver (clean install).",
+                    });
+            }
         }
     }
 

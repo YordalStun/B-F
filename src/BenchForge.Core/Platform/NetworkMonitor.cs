@@ -33,13 +33,13 @@ public sealed class NetworkMonitor : IDisposable
     {
         using var ping = new Ping();
         var lostInRow = new int[_targets.Count];
-        // Give up quietly if pinging isn't allowed at all (some VMs / firewalls).
-        bool anyReply = false; int attempts = 0;
+        var everReplied = new bool[_targets.Count];
         while (!_cts.IsCancellationRequested)
         {
             for (int i = 0; i < _targets.Count; i++)
             {
                 var t = _targets[i];
+                if (t.Unavailable) continue;
                 double? ms = null;
                 try
                 {
@@ -53,15 +53,17 @@ public sealed class NetworkMonitor : IDisposable
                     t.Sent++;
                     if (ms is double v)
                     {
-                        anyReply = true;
+                        everReplied[i] = true;
                         t.Received++; t.SumMs += v; t.MaxMs = Math.Max(t.MaxMs, v);
                         lostInRow[i] = 0;
                     }
                     else if (++lostInRow[i] == DropoutPings) { t.Dropouts++; DropoutStarted?.Invoke(t.Name); }
                 }
+                // A target that never answers at all is blocked (firewall / VM), not dropping out: stop judging it.
+                if (!everReplied[i] && t.Sent >= 5) t.Unavailable = true;
                 Sample?.Invoke(t.Name, ms ?? -1);
             }
-            if (!anyReply && ++attempts >= 5) { foreach (var t in _targets) t.Unavailable = true; return; }
+            if (_targets.All(t => t.Unavailable)) return;
             try { await Task.Delay(2000, _cts.Token); } catch { return; }
         }
     }

@@ -1280,3 +1280,45 @@ public class PeripheralTests
         Assert.DoesNotContain("Shading", f.Detail);
     }
 }
+
+public class GpuApiTests
+{
+    [Fact]
+    public void Vulkan_spirv_matches_the_hlsl_source()
+    {
+        // Run tools/compile-vk-shaders.sh after editing scenes.hlsl.
+        var dir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "BenchForge.Gpu", "Shaders");
+        // Line endings normalised so a Windows checkout (CRLF) hashes the same as the LF file the script compiled.
+        var src = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(Path.Combine(dir, "scenes.hlsl")).Replace("\r\n", "\n"));
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(src)).ToLowerInvariant();
+        Assert.Equal(hash, File.ReadAllText(Path.Combine(dir, "spv", "source.sha256")).Trim());
+        Assert.Equal(13, Directory.GetFiles(Path.Combine(dir, "spv"), "*.spv").Length);
+    }
+
+    [Fact]
+    public void All_runs_every_api_for_benchmarks_but_one_for_stress()
+    {
+        Assert.Equal(new[] { Gpu.GpuApis.OpenGL }, Gpu.GpuModule.ApisFor(null, StepKind.Benchmark));
+        Assert.Equal(new[] { Gpu.GpuApis.D3D11 }, Gpu.GpuModule.ApisFor(Gpu.GpuApis.D3D11, StepKind.Stress));
+        var all = Gpu.GpuModule.ApisFor("all", StepKind.Benchmark);
+        Assert.Contains(Gpu.GpuApis.Vulkan, all);
+        Assert.Contains(Gpu.GpuApis.OpenGL, all);
+        Assert.Single(Gpu.GpuModule.ApisFor("all", StepKind.Stress));
+    }
+
+    [Fact]
+    public void Slow_pcie_and_a_lagging_api_are_reported()
+    {
+        var hw = new HardwareInventory();
+        hw.PcieLinks.Add(new PcieLink("RTX", "GPU", 3, 4, 4, 16));
+        var gpu = new ModuleResult { Component = Component.Gpu, Kind = StepKind.Benchmark };
+        gpu.SubScores.Add(new SubScore { Name = "PCIe upload (PC → graphics card)", Group = "PCIe", Value = 2.9, Unit = "GB/s" });
+        gpu.SubScores.Add(new SubScore { Name = "DirectX 12 score", Group = "Graphics APIs", Value = 4000 });
+        gpu.SubScores.Add(new SubScore { Name = "OpenGL 4.3 score", Group = "Graphics APIs", Value = 1500 });
+        var r = new RunResult { Status = RunStatus.Completed, Hardware = hw, Steps = { new StepResult { Name = "GPU", Modules = { gpu } } } };
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title.StartsWith("Graphics card transfers only 2.9 GB/s"));
+        Assert.Contains(r.Findings, f => f.Title == "OpenGL 4.3 is far slower than DirectX 12");
+        Assert.Equal(25.2, Scoring.ScoreReferences.PcieGBs(4, 16), 1);
+    }
+}

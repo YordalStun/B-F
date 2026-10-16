@@ -25,6 +25,8 @@ public sealed partial class DriveChoice : ObservableObject
     [ObservableProperty] private bool _isChecked;
 }
 
+public sealed record GpuApiOption(string Key, string Name);
+
 public sealed record StepPreview(string Name, string Kind, string Parts, string Duration);
 
 public sealed partial class CustomStep : ObservableObject
@@ -63,6 +65,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
         _burnRam = s.BurnComponents.Contains(Component.Memory); _burnDisk = s.BurnComponents.Contains(Component.Storage);
         var t = s.Test;
         _cpuStressMode = t.CpuStressMode; _memoryPercent = t.MemoryPercent; _gpuFullscreen = t.GpuFullscreen;
+        _gpuApi = GpuApis.FirstOrDefault(a => a.Key == t.GpuApi) ?? GpuApis[0];
         _laptopMode = t.LaptopMode;
         _cpuTempLimit = t.CpuTempLimit; _gpuTempLimit = t.GpuTempLimit; _stopOnError = t.StopOnError; _reopenAfterCrash = t.ReopenAfterCrash; _storageFileMB = t.StorageFileMB;
         foreach (var d in DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady))
@@ -122,6 +125,15 @@ public sealed partial class RunSetupViewModel : PageViewModel
     [ObservableProperty] private string _storageTarget;
     [ObservableProperty] private int _storageFileMB;
     [ObservableProperty] private bool _gpuFullscreen;
+    public GpuApiOption[] GpuApis { get; } =
+    {
+        new(Core.Gpu.GpuApis.OpenGL, "OpenGL 4.3"),
+        new(Core.Gpu.GpuApis.D3D12, "DirectX 12"),
+        new(Core.Gpu.GpuApis.D3D11, "DirectX 11"),
+        new(Core.Gpu.GpuApis.Vulkan, "Vulkan"),
+        new("all", "All of them (compare)"),
+    };
+    [ObservableProperty] private GpuApiOption _gpuApi = null!;
     [ObservableProperty] private double _cpuTempLimit;
     [ObservableProperty] private double _gpuTempLimit;
     [ObservableProperty] private bool _stopOnError;
@@ -173,7 +185,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
     private TestSettings BuildSettings() => new()
     {
         CpuStressMode = CpuStressMode, MemoryPercent = MemoryPercent, StorageTarget = StorageTarget, StorageFileMB = StorageFileMB,
-        GpuFullscreen = GpuFullscreen, CpuTempLimit = CpuTempLimit, GpuTempLimit = GpuTempLimit, StopOnError = StopOnError, ReopenAfterCrash = ReopenAfterCrash,
+        GpuFullscreen = GpuFullscreen, GpuApi = GpuApi.Key, CpuTempLimit = CpuTempLimit, GpuTempLimit = GpuTempLimit, StopOnError = StopOnError, ReopenAfterCrash = ReopenAfterCrash,
         LaptopMode = LaptopMode, LaptopRules = LaptopRules,
     };
 

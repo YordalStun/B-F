@@ -90,6 +90,8 @@ public sealed class TestSettings
     public int GpuWidth { get; set; } = 1920;
     public int GpuHeight { get; set; } = 1080;
     public bool GpuFullscreen { get; set; }
+    /// <summary>Graphics API for the 3D test: gl, dx11, dx12, vulkan, or "all" (benchmark runs each one).</summary>
+    public string GpuApi { get; set; } = Gpu.GpuApis.OpenGL;
     public double CpuTempLimit { get; set; } = 95;
     public double GpuTempLimit { get; set; } = 90;
     /// <summary>Stop the whole run as soon as any computation/memory error is found.</summary>

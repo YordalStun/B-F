@@ -38,6 +38,39 @@ jobs:
           Get-Content "$st\work\align-selftest.log"
           if ($p.ExitCode -ne 0) { throw "Alignment self-test failed (exit $($p.ExitCode))" }
 
+      - name: 3D test on DirectX 11 / 12 (Microsoft WARP software renderer — the runner has no GPU)
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "gputest"
+          New-Item -ItemType Directory -Force "$dir\bin" | Out-Null
+          Copy-Item publish\BenchForge.exe "$dir\bin\"
+          $failed = $false
+          foreach ($api in 'dx11', 'dx12') {
+            $out = "$dir\$api.txt"
+            $p = Start-Process -FilePath "$dir\bin\BenchForge.exe" -ArgumentList '--gpu-worker', '--api', $api, '--headless', '--software', '--mode', 'bench', '--duration', '40', '--width', '480', '--height', '270', '--screenshots', "$dir\shots" -RedirectStandardOutput $out -RedirectStandardError "$dir\$api.err" -Wait -PassThru
+            $lines = Get-Content $out
+            $lines | Where-Object { $_ -notmatch '"t":"progress"' } | ForEach-Object { Write-Host "[$api] $_" }
+            Get-Content "$dir\$api.err" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[$api stderr] $_" }
+            $scenes = ($lines | Where-Object { $_ -match '"t":"scene"' }).Count
+            $vramOk = ($lines | Where-Object { $_ -match '"t":"vram"' -and $_ -notmatch '"errors"' }).Count -gt 0
+            $done = ($lines | Where-Object { $_ -match '"t":"done"' }).Count -gt 0
+            if ($p.ExitCode -ne 0 -or $scenes -lt 4 -or -not $vramOk -or -not $done) { Write-Host "::error::$api 3D test failed (exit $($p.ExitCode), $scenes scenes, vram ok: $vramOk, done: $done)"; $failed = $true }
+            else { Write-Host "$api OK: $scenes scenes, VRAM check clean" }
+          }
+          # An API without a driver must be reported as unavailable, not crash.
+          $p = Start-Process -FilePath "$dir\bin\BenchForge.exe" -ArgumentList '--gpu-worker', '--api', 'vulkan', '--headless', '--mode', 'bench', '--duration', '5' -RedirectStandardOutput "$dir\vk.txt" -Wait -PassThru
+          Write-Host "[vulkan] exit $($p.ExitCode): $(Get-Content "$dir\vk.txt" -Raw)"
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 2 -and $p.ExitCode -ne 3) { Write-Host "::error::Vulkan without a driver did not fail cleanly"; $failed = $true }
+          if ($failed) { exit 1 }
+
+      - name: Upload 3D test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3d-test-screenshots-warp
+          path: ${{ runner.temp }}/gputest/shots/
+          if-no-files-found: ignore
+
       - name: Package
         shell: pwsh
         run: |

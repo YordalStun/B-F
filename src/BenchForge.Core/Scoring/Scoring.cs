@@ -73,4 +73,19 @@ public static class ScoreReferences
         ["Compute"] = 250,     // 1 M particles × 4 sim steps + additive point render
         ["Fill-rate"] = 250,   // 40 blended full-screen layers, 4 texture taps each
     };
+
+    /// <summary>
+    /// Reference FPS per graphics API. Every API draws exactly the same scenes, so they start from the same figures;
+    /// they are kept separate so each can be calibrated against real cards on its own.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> GpuFor(string api) => api switch
+    {
+        _ => Gpu,
+    };
+
+    /// <summary>Practical PCIe transfer speed (GB/s, one direction) for a link: ~80 % of the raw rate after protocol overhead.</summary>
+    public static double PcieGBs(int gen, int lanes) => gen switch
+    {
+        1 => 0.25, 2 => 0.5, 3 => 0.985, 4 => 1.97, 5 => 3.94, 6 => 7.56, _ => 0,
+    } * lanes * 0.8;
 }

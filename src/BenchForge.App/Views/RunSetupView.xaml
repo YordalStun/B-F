@@ -168,6 +168,10 @@
                             </StackPanel>
                             <WrapPanel Grid.Row="4" Grid.ColumnSpan="2" Margin="0,8,0,0">
                                 <CheckBox Content="3D test full screen (borderless)" IsChecked="{Binding GpuFullscreen}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,0,16,6" ToolTip="The same 3D scenes run on each graphics API. 'All of them' benchmarks every API and shows them side by side — a big gap points to a driver problem.">
+                                    <TextBlock Text="3D test API" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <ComboBox Width="170" ItemsSource="{Binding GpuApis}" SelectedItem="{Binding GpuApi}" DisplayMemberPath="Name" />
+                                </StackPanel>
                                 <CheckBox Content="Stop at the first error" IsChecked="{Binding StopOnError}" />
                             </WrapPanel>
                             <WrapPanel Grid.Row="5" Grid.ColumnSpan="2">

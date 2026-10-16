@@ -15,6 +15,10 @@ var argList = args.ToList();
 string? outDir = null;
 int oi = argList.IndexOf("--out");
 if (oi >= 0 && oi + 1 < argList.Count) { outDir = argList[oi + 1]; argList.RemoveRange(oi, 2); }
+// --gpu-api gl|dx11|dx12|vulkan|all
+string? gpuApi = null;
+int gi = argList.IndexOf("--gpu-api");
+if (gi >= 0 && gi + 1 < argList.Count) { gpuApi = argList[gi + 1]; argList.RemoveRange(gi, 2); }
 if (argList.Count == 0) { Console.WriteLine("usage: benchforge-cli quick | bench <part> | stress <parts> <seconds> [--out dir]"); return 1; }
 if (outDir != null) DataPaths.Override(outDir);
 
@@ -47,6 +51,7 @@ if (argList[0] == "recover")
 }
 
 var settings = new TestSettings { MemoryPercent = 30, StorageFileMB = 256 };
+if (gpuApi != null) settings.GpuApi = gpuApi;
 static Component Parse(string s) => s.ToLowerInvariant() switch
 {
     "cpu" => Component.Cpu, "ram" or "memory" => Component.Memory, "disk" or "storage" => Component.Storage, "gpu" => Component.Gpu,
