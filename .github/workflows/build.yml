@@ -39,6 +39,8 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Alignment self-test failed (exit $($p.ExitCode))" }
 
       - name: 3D test on DirectX 11 / 12 (Microsoft WARP software renderer — the runner has no GPU)
+        # Runs even if the alignment self-test failed, so both results are always visible.
+        if: success() || failure()
         shell: pwsh
         run: |
           $dir = Join-Path $env:RUNNER_TEMP "gputest"
