@@ -99,8 +99,17 @@ public static class RecommendationEngine
             Add(Severity.Warning, Component.Storage, "Turn TRIM back on", "SSDs need TRIM to stay fast.", "Use the fix button below, then run 'Optimise' once");
             Fix("Turn TRIM back on", FixId.EnableTrim, FixId.RetrimSsd);
         }
-        if (Has(x => x.Title.Contains("partition not aligned")))
-            Add(Severity.Warning, Component.Storage, "Align the SSD partition", "A misaligned partition slows the SSD and adds wear.", "Use the 'align partition' feature of a partition tool (e.g. MiniTool, AOMEI) — back up first", "Or reinstall Windows on the SSD");
+        if (Has(x => x.Title.Contains("not aligned to 4 KB")))
+        {
+            Add(Severity.Warning, Component.Storage, "Align the SSD partition", "A misaligned partition slows the SSD and adds wear. Fixing it keeps your files, but back up first.",
+                "Back up your important files first — aligning moves the data on the disk",
+                "Check it yourself: Win+R › msinfo32 › Components › Storage › Disks › 'Partition Starting Offset'. Divide by 4096 — a whole number means aligned",
+                "Fix: install MiniTool Partition Wizard Free or AOMEI Partition Assistant Standard, right-click the partition › 'Align' (AOMEI: 'Partition Alignment', choose 4096) › Apply",
+                "For the Windows (C:) partition the tool restarts and works before Windows loads — 10–60 minutes; do not turn the PC off",
+                "Alternatives: a clean Windows install on the SSD, or re-clone with Macrium Reflect / Clonezilla (both align automatically)",
+                "Afterwards run the 'Re-TRIM SSD' fix and the drive benchmark again — 4K write scores should go up");
+            Fix("Align the SSD partition", FixId.RetrimSsd);
+        }
         if (Has(x => x.Title.Contains("Drive stalled")))
             Add(Severity.Warning, Component.Storage, "Find out why the drive stalls", "The drive sometimes takes far longer than normal to respond.",
                 "Check drive health (SMART / NVMe health below) and temperature", "Keep 15%+ free space on SSDs", "Update SSD firmware and storage drivers", "For SATA drives, try another cable/port");

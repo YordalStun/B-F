@@ -89,6 +89,8 @@ public sealed class DiskInfo
     public NvmeHealthInfo? Nvme { get; set; }
     /// <summary>A partition does not start on a 4 KB boundary (slows SSDs).</summary>
     public bool? Misaligned { get; set; }
+    /// <summary>Which partitions are misaligned, e.g. "C: (partition 2) starts at 32,256 bytes".</summary>
+    public List<string> MisalignedPartitions { get; set; } = new();
 }
 
 public sealed record SmartAttribute(int Id, string Name, int Current, int Worst, int? Threshold, long Raw)

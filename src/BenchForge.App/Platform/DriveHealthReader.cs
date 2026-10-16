@@ -130,15 +130,43 @@ public static partial class DriveHealthReader
 
     private static void Alignment(HardwareInventory inv)
     {
-        using var s = new ManagementObjectSearcher("SELECT DiskIndex, StartingOffset FROM Win32_DiskPartition");
+        // Partition DeviceID ("Disk #0, Partition #1") → drive letter ("C:").
+        var letters = new Dictionary<string, string>();
+        try
+        {
+            using var map = new ManagementObjectSearcher("SELECT Antecedent, Dependent FROM Win32_LogicalDiskToPartition");
+            foreach (ManagementObject m in map.Get())
+            {
+                string? part = Quoted(m["Antecedent"]?.ToString()), letter = Quoted(m["Dependent"]?.ToString());
+                if (part != null && letter != null) letters[part] = letters.TryGetValue(part, out var l) ? l + ", " + letter : letter;
+            }
+        }
+        catch { /* letters are only a nicer label */ }
+
+        using var s = new ManagementObjectSearcher("SELECT DeviceID, DiskIndex, Index, StartingOffset FROM Win32_DiskPartition");
         foreach (ManagementObject o in s.Get())
         {
             int idx = Convert.ToInt32(o["DiskIndex"]);
             long off = Convert.ToInt64(o["StartingOffset"]);
             var d = inv.Disks.FirstOrDefault(x => x.DiskNumber == idx);
             if (d == null) continue;
-            if (off % 4096 != 0) d.Misaligned = true;
+            if (off % 4096 != 0)
+            {
+                d.Misaligned = true;
+                // Win32_DiskPartition.Index is 0-based; Disk Management shows partitions from 1.
+                int num = Convert.ToInt32(o["Index"]) + 1;
+                var label = letters.TryGetValue(o["DeviceID"]?.ToString() ?? "", out var l) ? $"{l} (partition {num})" : $"Partition {num}";
+                d.MisalignedPartitions.Add($"{label} starts at {off:N0} bytes — not a multiple of 4,096");
+            }
             else d.Misaligned ??= false;
         }
+    }
+
+    /// <summary>Pulls the value out of a WMI reference like <c>Win32_DiskPartition.DeviceID="Disk #0, Partition #1"</c>.</summary>
+    private static string? Quoted(string? reference)
+    {
+        if (reference == null) return null;
+        int a = reference.IndexOf('"'), b = reference.LastIndexOf('"');
+        return a >= 0 && b > a ? reference[(a + 1)..b] : null;
     }
 }

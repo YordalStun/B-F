@@ -731,4 +731,20 @@ public class DriveTests
         RunAnalyzer.Analyze(r);
         Assert.DoesNotContain(r.Findings, f => f.Component == Component.Storage && f.Severity >= Severity.Warning);
     }
+
+    [Fact]
+    public void Misaligned_ssd_names_the_partition_and_gives_steps()
+    {
+        var hw = new HardwareInventory();
+        hw.Disks.Add(new DiskInfo { Model = "ClonedSSD", MediaType = "SSD", BusType = "SATA", Misaligned = true, MisalignedPartitions = { "C: (partition 2) starts at 32,256 bytes — not a multiple of 4,096" } });
+        hw.Disks.Add(new DiskInfo { Model = "OldHDD", MediaType = "HDD", BusType = "SATA", Misaligned = true });
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        var f = Assert.Single(r.Findings, x => x.Title.Contains("not aligned"));
+        Assert.Equal("ClonedSSD: partition C: not aligned to 4 KB", f.Title);
+        Assert.Contains("32,256 bytes", f.Detail);
+        var rec = Assert.Single(r.Recommendations, x => x.Title == "Align the SSD partition");
+        Assert.Contains(rec.Actions, a => a.Contains("msinfo32"));
+        Assert.Contains(FixId.RetrimSsd, rec.Fixes);
+    }
 }

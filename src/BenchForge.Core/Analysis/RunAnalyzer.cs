@@ -345,7 +345,16 @@ public static class RunAnalyzer
                     f.Add(new Finding { Severity = Severity.Info, Component = Component.Storage, Title = $"{d.Model}: {n.UnsafeShutdowns} unsafe shutdowns", Detail = "Many power losses / hard resets — matches crash or power problems if you have them." });
             }
             if (d.Misaligned == true && d.MediaType == "SSD")
-                f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = $"{d.Model}: partition not aligned to 4 KB", Detail = "Usually from cloning an old hard drive. Every write touches two flash pages — slower and more wear. Fix with a partition tool's 'align' function or a fresh install." });
+            {
+                var which = d.MisalignedPartitions.Count > 0 ? " — " + string.Join("; ", d.MisalignedPartitions) + "." : "";
+                var letter = d.MisalignedPartitions.Select(p => p.Split(' ')[0]).FirstOrDefault(p => p.EndsWith(':'));
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Component = Component.Storage,
+                    Title = $"{d.Model}: partition {(letter != null ? letter + " " : "")}not aligned to 4 KB",
+                    Detail = $"SSDs write in 4 KB pages; a partition that starts between pages makes every small write touch two pages — slower and more wear{which} Usually caused by cloning an old hard drive.",
+                });
+            }
         }
         foreach (var l in hw.PcieLinks.Where(l => l.Degraded))
             f.Add(new Finding

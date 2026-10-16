@@ -159,7 +159,7 @@ public static class AiExport
                 sb.AppendLine($"  - NVMe: critical warning {Storage.SmartParser.DescribeCriticalWarning(n.CriticalWarning)}; {n.PercentageUsed}% life used; spare {n.AvailableSparePercent}% (threshold {n.SpareThresholdPercent}%); media errors {n.MediaErrors}; unsafe shutdowns {n.UnsafeShutdowns}; {n.PowerOnHours} h on; {n.PowerCycles} power cycles; {n.DataWrittenTB:0.##} TB written / {n.DataReadTB:0.##} TB read; {n.TemperatureC} °C");
             if (d.Smart.Count > 0)
                 sb.AppendLine("  - SMART: " + string.Join("; ", d.Smart.Select(a => $"{a.Id} {a.Name} = {a.Raw} (value {a.Current}/{a.Worst}{(a.Threshold is int t ? $", threshold {t}" : "")}{(a.Failing ? ", FAILING" : "")})")));
-            if (d.Misaligned == true) sb.AppendLine("  - Partition NOT aligned to 4 KB");
+            if (d.Misaligned == true) sb.AppendLine("  - Partition NOT aligned to 4 KB" + (d.MisalignedPartitions.Count > 0 ? ": " + string.Join("; ", d.MisalignedPartitions) : ""));
         }
         foreach (var l in hw.PcieLinks) sb.AppendLine($"- **PCIe link — {l.Device} ({l.Kind}):** {l}{(l.Degraded ? " ← running below maximum" : "")}");
         if (hw.TrimEnabled is bool trim) sb.AppendLine($"- **TRIM:** {(trim ? "on" : "OFF")}");
