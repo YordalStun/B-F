@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Management;
+using System.Runtime.InteropServices;
+using Microsoft.Win32;
 using System.Text;
 using BenchForge.Core.Model;
 using BenchForge.Core.Storage;
@@ -31,7 +33,8 @@ public static class PartitionReader
 
         var encryption = ReadBitLocker();
         var list = new List<PartitionEntry>();
-        var raw = Query("SELECT DiskNumber, PartitionNumber, DriveLetter, Offset, Size, IsSystem, IsBoot, IsHidden, GptType, MbrType FROM MSFT_Partition", StorageNs);
+        var raw = Query("SELECT DiskNumber, PartitionNumber, DriveLetter, Offset, Size, IsSystem, IsBoot, IsHidden, GptType, MbrType, AccessPaths FROM MSFT_Partition", StorageNs);
+        var paths = new Dictionary<PartitionEntry, string[]>();
         foreach (var o in raw)
         {
             int disk = Int(o, "DiskNumber");
@@ -57,13 +60,109 @@ public static class PartitionReader
                 p.HasPageFile = pageFiles.Contains(c);
                 p.Encrypted = encryption == null ? null : encryption.TryGetValue(c, out var e) ? e : false;
             }
+            paths[p] = o["AccessPaths"] as string[] ?? Array.Empty<string>();
             list.Add(p);
         }
+        var shadow = ShadowStorageHosts();
+        foreach (var p in list.Where(x => x.DriveLetter != null))
+            try { FindBlockers(p, list, paths, shadow); }
+            catch (Exception ex) { p.Blockers.Add($"Could not check what depends on {p.Name} ({ex.Message})."); }
         // MBR logical partitions live inside an extended container (type 0x05 / 0x0F).
         foreach (var ext in list.Where(x => x.MbrType is 5 or 15).ToList())
             foreach (var p in list.Where(x => x.DiskNumber == ext.DiskNumber && x != ext && x.Offset >= ext.Offset && x.Offset < ext.Offset + ext.Size))
                 p.IsLogical = true;
         return list.OrderBy(x => x.DiskNumber).ThenBy(x => x.Offset).ToList();
+    }
+
+    /// <summary>
+    /// Finds things tied to this exact volume (its ID, file IDs or registration) that a recreated partition would break,
+    /// even though every file comes back identical.
+    /// </summary>
+    private static void FindBlockers(PartitionEntry p, List<PartitionEntry> all, Dictionary<PartitionEntry, string[]> paths, Dictionary<char, List<char>> shadow)
+    {
+        char l = p.DriveLetter!.Value;
+        string root = $"{l}:\\";
+        bool Has(string rel) { try { return Directory.Exists(Path.Combine(root, rel)); } catch { return false; } }
+
+        if (Has("WindowsApps") || Has("WpSystem") || Has(@"Program Files\WindowsApps") || Has(@"Program Files\ModifiableWindowsApps"))
+            p.Blockers.Add($"Microsoft Store / Xbox apps are installed on {l}:. They are registered to this exact drive and would need reinstalling. Move them first (Settings › Apps › Installed apps › ⋯ › Move) or use a partition tool.");
+
+        foreach (var folder in SyncFolders())
+            if (folder.Length > 2 && char.ToUpperInvariant(folder[0]) == l && folder[1] == ':')
+                p.Blockers.Add($"A cloud sync folder is on {l}: ({folder}). Sync apps track files by the drive's internal IDs and could re-sync or delete files. Move the folder or unlink the app first, or use a partition tool.");
+        foreach (var name in new[] { "OneDrive", "Dropbox", "Google Drive", "My Drive", "iCloudDrive", "iCloud Drive", "MEGA" })
+            try
+            {
+                foreach (var d in Directory.EnumerateDirectories(root, name + "*"))
+                    p.Blockers.Add($"A cloud sync folder is on {l}: ({d}). Sync apps track files by the drive's internal IDs and could re-sync or delete files. Move the folder or unlink the app first.");
+            }
+            catch { }
+
+        if (Has("FileHistory"))
+            p.Blockers.Add($"Windows File History saves its backups to {l}:. Turn File History off (or pick another drive) first.");
+
+        if (shadow.TryGetValue(l, out var forOthers) && forOthers.Any(x => x != l))
+            p.Blockers.Add($"Restore points for {string.Join(", ", forOthers.Where(x => x != l).Select(x => x + ":"))} are stored on {l}: and would be lost. Move them first (System Properties › System Protection › Configure) or use a partition tool.");
+
+        foreach (var ap in paths.GetValueOrDefault(p, Array.Empty<string>()))
+            if (ap.Length > 3 && !ap.StartsWith(@"\\?\", StringComparison.Ordinal))
+                p.Blockers.Add($"{l}: is also mounted as the folder {ap}. Remove that mount point in Disk Management first.");
+        foreach (var other in all.Where(x => x != p))
+            foreach (var ap in paths.GetValueOrDefault(other, Array.Empty<string>()))
+                if (ap.Length > 3 && char.ToUpperInvariant(ap[0]) == l && ap[1] == ':')
+                    p.Blockers.Add($"Another drive is mounted inside {l}: ({ap}). Remove that mount point in Disk Management first.");
+    }
+
+    /// <summary>OneDrive and Dropbox folders from their own settings.</summary>
+    private static IEnumerable<string> SyncFolders()
+    {
+        var list = new List<string>();
+        try
+        {
+            using var accounts = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\OneDrive\Accounts");
+            foreach (var name in accounts?.GetSubKeyNames() ?? Array.Empty<string>())
+                if (accounts!.OpenSubKey(name)?.GetValue("UserFolder") is string f && f.Length > 0) list.Add(f);
+        }
+        catch { }
+        try
+        {
+            var info = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dropbox", "info.json");
+            if (File.Exists(info))
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(info), "\"path\"\\s*:\\s*\"([^\"]+)\""))
+                    list.Add(System.Text.RegularExpressions.Regex.Unescape(m.Groups[1].Value));
+        }
+        catch { }
+        return list;
+    }
+
+    /// <summary>Storage volume → volumes whose restore points (shadow copies) it holds, from 'vssadmin list shadowstorage'.</summary>
+    private static Dictionary<char, List<char>> ShadowStorageHosts()
+    {
+        var map = new Dictionary<char, List<char>>();
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("vssadmin.exe", "list shadowstorage") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true };
+            using var proc = System.Diagnostics.Process.Start(psi)!;
+            var text = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(15000);
+            char? forVol = null;
+            foreach (var line in text.Split('\n'))
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(line, @"\(([A-Za-z]):\)");
+                if (!m.Success) continue;
+                char c = char.ToUpperInvariant(m.Groups[1].Value[0]);
+                // Every association lists the protected volume first, then the storage volume.
+                if (forVol == null) forVol = c;
+                else
+                {
+                    if (!map.TryGetValue(c, out var l)) map[c] = l = new();
+                    l.Add(forVol.Value);
+                    forVol = null;
+                }
+            }
+        }
+        catch { }
+        return map;
     }
 
     /// <summary>Drives that could hold the temporary copy.</summary>
@@ -141,19 +240,55 @@ public sealed class WindowsAlignOps : IAlignOps
         return code < 8;
     }
 
-    public async Task<long?> Recreate(PartitionEntry p, Action<string> log)
+    public Task<RecreateResult> Recreate(PartitionEntry p, Action<string> log) => RunScript(PartitionAlign.RecreateScript(p), deletesFirst: true, log);
+    public Task<RecreateResult> RecreateMissing(PartitionEntry p, Action<string> log) => RunScript(PartitionAlign.RecreateMissingScript(p), deletesFirst: false, log);
+
+    private static async Task<RecreateResult> RunScript(string script, bool deletesFirst, Action<string> log)
     {
-        var script = PartitionAlign.RecreateScript(p);
         foreach (var line in script.Split('\n', StringSplitOptions.RemoveEmptyEntries)) log("  PS> " + line.TrimEnd());
         long? offset = null;
+        bool removed = !deletesFirst;
+        string? lastError = null;
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         int code = await FixRunner.RunProcess("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}", line =>
         {
-            if (line.StartsWith("NEWOFFSET=") && long.TryParse(line[10..], out var o)) offset = o;
-            else log("  " + line);
+            if (line == PartitionAlign.RemovedMarker) { removed = true; log("  Old partition removed."); }
+            else if (line.StartsWith(PartitionAlign.OffsetMarker) && long.TryParse(line[PartitionAlign.OffsetMarker.Length..], out var o)) offset = o;
+            else { log("  " + line); lastError = line; }
         }, CancellationToken.None, Encoding.UTF8);
-        return code == 0 ? offset : null;
+        return new RecreateResult(code == 0 ? offset : null, deletesFirst ? removed : true, code == 0 ? null : lastError ?? $"PowerShell exit code {code}");
     }
+
+    /// <summary>
+    /// Proves no program has a file open on the volume (the lock fails otherwise) and dismounts it so open handles from
+    /// background services are closed. The lock is released straight away; the recreate runs right after.
+    /// </summary>
+    public Task<string?> LockAndDismount(char letter, Action<string> log) => Task.Run<string?>(() =>
+    {
+        using var h = CreateFileW($@"\\.\{letter}:", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+        if (h.IsInvalid) return $"Could not open {letter}: to lock it (error {Marshal.GetLastWin32Error()}).";
+        bool locked = false;
+        for (int i = 0; i < 10 && !locked; i++)
+        {
+            locked = DeviceIoControl(h, FSCTL_LOCK_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+            if (!locked) Thread.Sleep(500);
+        }
+        if (!locked) return $"Some program still has files open on {letter}: (lock failed, error {Marshal.GetLastWin32Error()}). Close it — e.g. Explorer windows, games, Steam, antivirus scans — and try again.";
+        log($"  {letter}: locked — no program is using it.");
+        if (!DeviceIoControl(h, FSCTL_DISMOUNT_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
+            return $"Could not dismount {letter}: (error {Marshal.GetLastWin32Error()}).";
+        log($"  {letter}: dismounted.");
+        return null;
+    });
+
+    private const uint GENERIC_READ = 0x80000000, GENERIC_WRITE = 0x40000000, FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
+    private const uint FSCTL_LOCK_VOLUME = 0x00090018, FSCTL_DISMOUNT_VOLUME = 0x00090020;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sa, uint disposition, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle h, uint code, IntPtr inBuf, int inSize, IntPtr outBuf, int outSize, out int returned, IntPtr overlapped);
 
     public async Task<bool> WaitForDrive(char letter, TimeSpan timeout)
     {

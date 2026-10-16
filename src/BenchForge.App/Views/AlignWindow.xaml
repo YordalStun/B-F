@@ -68,7 +68,11 @@
                             <ComboBox x:Name="BackupCombo" Width="300" DisplayMemberPath="Text" SelectionChanged="BackupCombo_SelectionChanged" />
                         </StackPanel>
                         <TextBlock x:Name="BackupWarning" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,10" />
-                        <Button x:Name="FixButton" Style="{StaticResource PrimaryButton}" Click="Fix_Click" HorizontalAlignment="Left" />
+                        <WrapPanel>
+                            <Button x:Name="PracticeButton" Content="Practice run (changes nothing)" Click="Practice_Click" Margin="0,0,8,6"
+                                    ToolTip="Copies and checks every file, then deletes the copy. Proves the fix would work without touching the drive." />
+                            <Button x:Name="FixButton" Style="{StaticResource PrimaryButton}" Click="Fix_Click" Margin="0,0,8,6" />
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
 

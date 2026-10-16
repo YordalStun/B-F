@@ -110,6 +110,7 @@ public partial class AlignWindow : Window
         BackupCombo.SelectedIndex = targets.Count > 0 ? 0 : -1;
         FixButton.Content = $"Fix {p.Name}";
         FixButton.IsEnabled = targets.Count > 0 && !_busy;
+        PracticeButton.IsEnabled = targets.Count > 0 && !_busy;
         BackupWarning.Text = targets.Count == 0 ? $"No other drive has {(used + PartitionAlign.BackupMargin) / 1e9:0} GB free for the temporary copy. Plug in a USB drive with enough space (not FAT32) and press 'Check again'." : "";
         BackupWarning.Visibility = targets.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -156,12 +157,21 @@ public partial class AlignWindow : Window
         await RunJob(aligner => aligner.RunAsync(p, $"{p.DriveLetter}:\\", folder, ConfirmDelete, ConfirmRemoveBackup, _cts!.Token), p, retrimAfter: false);
     }
 
+    private async void Practice_Click(object sender, RoutedEventArgs e)
+    {
+        if (PartitionList.SelectedItem is not PartitionRow r || BackupCombo.SelectedItem is not BackupVolume target) return;
+        var p = r.P;
+        var folder = PartitionAligner.BackupFolderFor(p, $"{target.Letter}:\\");
+        await RunJob(aligner => aligner.RunAsync(p, $"{p.DriveLetter}:\\", folder, _ => Task.FromResult(false), ConfirmRemoveBackup, _cts!.Token, practice: true), p, retrimAfter: false,
+            doneText: "Practice run passed — the fix would work. Nothing was changed.");
+    }
+
     /// <param name="retrimAfter">Re-TRIM when done. Not needed after a fix started here: <see cref="Reload"/> notices the partition became aligned and does it.</param>
-    private async Task RunJob(Func<PartitionAligner, Task<bool>> work, PartitionEntry? p, bool retrimAfter)
+    private async Task RunJob(Func<PartitionAligner, Task<bool>> work, PartitionEntry? p, bool retrimAfter, string doneText = "Done — the partition is aligned.")
     {
         _busy = true; _pastPointOfNoReturn = false;
         _cts = new CancellationTokenSource();
-        FixButton.IsEnabled = false; ResumeButton.IsEnabled = false; RefreshButton.IsEnabled = false; CancelButton.IsEnabled = true;
+        FixButton.IsEnabled = false; PracticeButton.IsEnabled = false; ResumeButton.IsEnabled = false; RefreshButton.IsEnabled = false; CancelButton.IsEnabled = true;
         Output.Clear();
         ShowProgress("Starting…");
         var aligner = new PartitionAligner(new WindowsAlignOps(), Append, (f, s) => Dispatcher.BeginInvoke(() =>
@@ -175,7 +185,7 @@ public partial class AlignWindow : Window
         catch (Exception ex) { Append("Unexpected error: " + ex.Message); ok = false; }
         _busy = false;
         CancelButton.IsEnabled = false; RefreshButton.IsEnabled = true; ResumeButton.IsEnabled = true;
-        StatusText.Text = ok ? "Done — the partition is aligned." : "Stopped — see the details below.";
+        StatusText.Text = ok ? doneText : "Stopped — see the details below.";
         if (ok && retrimAfter && p?.DriveLetter is char letter && p.MediaType == "SSD") await Retrim(letter);
         await Reload();
         ShowResume();
@@ -217,8 +227,10 @@ public partial class AlignWindow : Window
         ResumeText.Text = $"Started {job.Started:g} on {job.Letter}:. Your files are safe in the temporary copy:\n{job.BackupFolder}\n\n"
                         + (driveBack
                             ? $"{job.Letter}: exists again. Press 'Finish restoring' to copy the files back and check them."
-                            : $"{job.Letter}: is missing. Open Disk Management, right-click the unallocated space on disk {job.DiskNumber} › New Simple Volume, give it the letter {job.Letter}, then press 'Finish restoring'.");
-        ResumeButton.IsEnabled = driveBack && !_busy;
+                            : job.Partition != null
+                                ? $"{job.Letter}: is missing. Press 'Finish restoring' — BenchForge creates it again in its old place (only if that space is still free) and copies the files back."
+                                : $"{job.Letter}: is missing. Open Disk Management, right-click the unallocated space on disk {job.DiskNumber} › New Simple Volume, give it the letter {job.Letter}, then press 'Finish restoring'.");
+        ResumeButton.IsEnabled = (driveBack || job.Partition != null) && !_busy;
         ResumePanel.Visibility = Visibility.Visible;
     }
 
@@ -226,7 +238,7 @@ public partial class AlignWindow : Window
     {
         var job = AlignJob.Load();
         if (job == null || !Directory.Exists(job.BackupFolder)) { MessageBox.Show(this, "The temporary copy folder was not found.", "Partition alignment"); return; }
-        await RunJob(a => a.RestoreAsync(job, null, $"{job.Letter}:\\", ConfirmRemoveBackup), _parts.FirstOrDefault(x => x.DriveLetter == job.Letter), retrimAfter: true);
+        await RunJob(a => a.ResumeAsync(job, $"{job.Letter}:\\", DriveReady(job.Letter), ConfirmRemoveBackup), job.Partition ?? _parts.FirstOrDefault(x => x.DriveLetter == job.Letter), retrimAfter: true);
     }
 
     private static bool DriveReady(char letter) { try { return new DriveInfo($"{letter}:\\").IsReady; } catch { return false; } }

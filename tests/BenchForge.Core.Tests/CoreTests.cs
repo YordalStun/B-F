@@ -821,7 +821,6 @@ public class PartitionAlignTests
         var p = DataPart(); p.Label = "Bob's games";
         var s = Storage.PartitionAlign.RecreateScript(p);
         var (o, size) = Storage.PartitionAlign.NewLayout(p.Offset, p.Size);
-        Assert.Contains("Remove-Partition -DiskNumber 1 -PartitionNumber 2", s);
         Assert.Contains($"-Offset {o} -Size {size} -DriveLetter D -GptType '{Storage.PartitionAlign.GptBasicData}'", s);
         Assert.Contains("-FileSystem NTFS -NewFileSystemLabel 'Bob''s games'", s);
         var mbr = DataPart(); mbr.PartitionStyle = "MBR"; mbr.MbrType = 0x0B; mbr.FileSystem = "FAT32";
@@ -861,13 +860,25 @@ public class PartitionAlignTests
             }
         }
 
-        public Task<long?> Recreate(Storage.PartitionEntry p, Action<string> log)
+        public string? LockError;
+        public bool GuardFails;
+        public int Locked, RecreatedMissing;
+        public Task<Storage.RecreateResult> Recreate(Storage.PartitionEntry p, Action<string> log)
         {
-            if (FailRecreate) { Directory.Delete(Drive, true); return Task.FromResult<long?>(null); }
+            if (GuardFails) return Task.FromResult(new Storage.RecreateResult(null, false, "The partition changed since it was checked"));
+            if (FailRecreate) { Directory.Delete(Drive, true); return Task.FromResult(new Storage.RecreateResult(null, true, "format failed")); }
             Recreated++;
             Directory.Delete(Drive, true); Directory.CreateDirectory(Drive); // formatted = empty
-            return Task.FromResult<long?>(Storage.PartitionAlign.NewLayout(p.Offset, p.Size).Offset);
+            return Task.FromResult(new Storage.RecreateResult(Storage.PartitionAlign.NewLayout(p.Offset, p.Size).Offset, true));
         }
+        public Task<Storage.RecreateResult> RecreateMissing(Storage.PartitionEntry p, Action<string> log)
+        {
+            if (Directory.Exists(Drive)) return Task.FromResult(new Storage.RecreateResult(null, true, "space not free"));
+            RecreatedMissing++;
+            Directory.CreateDirectory(Drive);
+            return Task.FromResult(new Storage.RecreateResult(Storage.PartitionAlign.NewLayout(p.Offset, p.Size).Offset, true));
+        }
+        public Task<string?> LockAndDismount(char letter, Action<string> log) { Locked++; return Task.FromResult(LockError); }
         public Task<bool> WaitForDrive(char letter, TimeSpan timeout) => Task.FromResult(Directory.Exists(Drive));
     }
 
@@ -992,5 +1003,153 @@ public class PartitionAlignTests
         File.WriteAllText(Path.Combine(b, "link"), "a plain file where the link was");
         Assert.Contains("link became a normal file/folder: link", Storage.FileManifest.Compare(ma, Storage.FileManifest.Build(b)));
         Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Interrupted_fix_recreates_the_missing_drive_and_restores()
+    {
+        var (root, drive, backup) = Setup();
+        var before = Storage.FileManifest.Build(drive);
+        var ops = new FakeOps { Drive = drive, FailRecreate = true };
+        var log = new List<string>();
+        Assert.False(await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None));
+        var job = Storage.AlignJob.Load()!;
+        Assert.NotNull(job.Partition);
+        Assert.False(Directory.Exists(drive)); // the "drive" is gone, like after a power cut
+
+        ops.FailRecreate = false;
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).ResumeAsync(job, drive, driveExists: false, Yes);
+        Assert.True(ok, string.Join("\n", log));
+        Assert.Equal(1, ops.RecreatedMissing);
+        Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+        Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Practice_run_never_touches_the_drive()
+    {
+        var (root, drive, backup) = Setup();
+        var before = Storage.FileManifest.Build(drive);
+        var ops = new FakeOps { Drive = drive };
+        bool ok = await new Storage.PartitionAligner(ops, _ => { }, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None, practice: true);
+        Assert.True(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.Equal(0, ops.Locked);
+        Assert.False(Directory.Exists(backup));
+        Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+        Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Files_changed_after_the_check_stop_the_fix()
+    {
+        var (root, drive, backup) = Setup();
+        var ops = new FakeOps { Drive = drive };
+        var log = new List<string>();
+        Task<bool> ChangeThenYes(string _) { File.AppendAllText(Path.Combine(drive, "notes.txt"), " more"); return Task.FromResult(true); }
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, ChangeThenYes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.Contains(log, l => l.Contains("changed after they were copied"));
+        Assert.Equal("hello more", File.ReadAllText(Path.Combine(drive, "notes.txt")));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Open_files_or_a_changed_partition_mean_nothing_is_deleted()
+    {
+        foreach (var setup in new Action<FakeOps>[] { o => o.LockError = "Some program still has files open on D:.", o => o.GuardFails = true })
+        {
+            var (root, drive, backup) = Setup();
+            var before = Storage.FileManifest.Build(drive);
+            var ops = new FakeOps { Drive = drive };
+            setup(ops);
+            var log = new List<string>();
+            bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+            Assert.False(ok);
+            Assert.Equal(0, ops.Recreated);
+            Assert.Contains(log, l => l.Contains("Nothing was changed") || l.Contains("was not changed"));
+            Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+            Assert.Null(Storage.AlignJob.Load());       // nothing to resume
+            Assert.False(Directory.Exists(backup));     // our own temporary copy is cleaned up
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Files_that_would_not_fit_back_stop_the_fix()
+    {
+        var (root, drive, backup) = Setup();
+        var ops = new FakeOps { Drive = drive };
+        var log = new List<string>();
+        var tiny = DataPart(size: 200L << 20); // new partition < files + 256 MB margin
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(tiny, drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.Contains(log, l => l.Contains("new partition holds"));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task An_existing_folder_is_never_used_or_deleted()
+    {
+        var (root, drive, backup) = Setup();
+        Directory.CreateDirectory(backup);
+        File.WriteAllText(Path.Combine(backup, "my old kept copy.txt"), "keep me");
+        var ops = new FakeOps { Drive = drive };
+        bool ok = await new Storage.PartitionAligner(ops, _ => { }, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.True(File.Exists(Path.Combine(backup, "my old kept copy.txt")));
+        var p = DataPart();
+        var a = Storage.PartitionAligner.BackupFolderFor(p, root);
+        Directory.CreateDirectory(a);
+        Assert.NotEqual(a, Storage.PartitionAligner.BackupFolderFor(p, root));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public void Safe_delete_removes_links_but_never_their_targets()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bf-del-" + Guid.NewGuid().ToString("N"));
+        var outside = Path.Combine(root, "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "precious.txt"), "do not delete");
+        var tree = Path.Combine(root, "tree");
+        Directory.CreateDirectory(Path.Combine(tree, "sub"));
+        File.WriteAllText(Path.Combine(tree, "sub", "ro.txt"), "x");
+        File.SetAttributes(Path.Combine(tree, "sub", "ro.txt"), FileAttributes.ReadOnly);
+        Directory.CreateSymbolicLink(Path.Combine(tree, "sub", "link"), outside);
+        Storage.SafeDelete.Tree(tree);
+        Assert.False(Directory.Exists(tree));
+        Assert.True(File.Exists(Path.Combine(outside, "precious.txt")));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public void Drive_tied_things_block_the_automatic_fix()
+    {
+        var p = DataPart();
+        p.Blockers.Add("Microsoft Store / Xbox apps are installed on D:.");
+        var v = Storage.PartitionAlign.Check(p);
+        Assert.False(v.CanAutoFix);
+        Assert.Contains("Store", v.Reason);
+    }
+
+    [Fact]
+    public void Recreate_script_re_finds_the_partition_by_letter_and_checks_it()
+    {
+        var p = DataPart();
+        var s = Storage.PartitionAlign.RecreateScript(p);
+        Assert.Contains("Get-Partition -DriveLetter D", s);
+        Assert.Contains($"$old.Offset -ne {p.Offset}", s);
+        Assert.Contains($"$old.Size -ne {p.Size}", s);
+        Assert.Contains("$old.DiskNumber -ne 1", s);
+        Assert.DoesNotContain("-PartitionNumber", s); // numbers can change; never delete by number
+        Assert.True(s.IndexOf("throw", StringComparison.Ordinal) < s.IndexOf("Remove-Partition", StringComparison.Ordinal));
+        var m = Storage.PartitionAlign.RecreateMissingScript(p);
+        Assert.DoesNotContain("Remove-Partition", m);
+        Assert.Contains("not free any more", m);
     }
 }

@@ -28,6 +28,16 @@ jobs:
           -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
           -p:DebugType=none -p:GenerateDocumentationFile=false -o publish
 
+      - name: Partition-alignment self-test (real Windows, throw-away virtual disks)
+        shell: pwsh
+        run: |
+          $st = Join-Path $env:RUNNER_TEMP "aligntest"
+          New-Item -ItemType Directory -Force "$st\bin" | Out-Null
+          Copy-Item publish\BenchForge.exe "$st\bin\"
+          $p = Start-Process -FilePath "$st\bin\BenchForge.exe" -ArgumentList '--align-selftest', "$st\work" -Wait -PassThru
+          Get-Content "$st\work\align-selftest.log"
+          if ($p.ExitCode -ne 0) { throw "Alignment self-test failed (exit $($p.ExitCode))" }
+
       - name: Package
         shell: pwsh
         run: |
