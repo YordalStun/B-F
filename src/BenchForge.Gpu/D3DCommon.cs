@@ -48,8 +48,27 @@ internal static unsafe class D3DCommon
         }
     }
 
+    /// <summary>Set by the active backend: asks the device why it was lost.</summary>
+    public static Func<int>? RemovedReason;
+
     public static void Check(int hr, string what)
     {
-        if (hr < 0) throw new InvalidOperationException($"{what} failed (HRESULT 0x{hr:X8})");
+        if (hr >= 0) return;
+        string why = "";
+        if ((uint)hr is 0x887A0005 or 0x887A0006 or 0x887A0007 && RemovedReason != null)
+        {
+            int r = 0;
+            try { r = RemovedReason(); } catch { }
+            why = (uint)r switch
+            {
+                0x887A0006 => " - the GPU stopped responding (driver timeout)",
+                0x887A0007 => " - the GPU was reset",
+                0x887A0020 => " - driver internal error",
+                0x887A0001 => " - the program sent the GPU an invalid command",
+                0x887A0005 => " - the GPU was removed",
+                _ => r < 0 ? $" - reason 0x{r:X8}" : "",
+            };
+        }
+        throw new InvalidOperationException($"{what} failed (HRESULT 0x{hr:X8}){why}");
     }
 }

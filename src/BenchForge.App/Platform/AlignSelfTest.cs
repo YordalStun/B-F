@@ -41,7 +41,7 @@ public static class AlignSelfTest
         // deliberately misaligned partition with PowerShell. MBR: sector 63 (32,256 bytes, the classic XP-era start);
         // GPT: 20 MB + 3.5 KB, past the reserved area. Neither is a multiple of 4,096.
         Diskpart($"""
-            create vdisk file="{vhd}" maximum=1024 type=expandable
+            create vdisk file="{vhd}" maximum=1024 type=fixed
             select vdisk file="{vhd}"
             attach vdisk
             """);

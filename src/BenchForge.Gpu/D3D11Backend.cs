@@ -70,6 +70,7 @@ internal sealed unsafe class D3D11Backend : IGpuBackend
     {
         _window = window; _w = width; _h = height;
         _d3d = D3D11.GetApi(null, false);
+        D3DCommon.RemovedReason = () => _dev != null ? _dev->GetDeviceRemovedReason() : 0;
         _dxgi = DXGI.GetApi(null, false);
         D3DFeatureLevel level = D3DFeatureLevel.Level110, got;
         ID3D11Device* dev = null; ID3D11DeviceContext* ctx = null;

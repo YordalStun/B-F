@@ -71,6 +71,7 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
     {
         _window = window; _w = width; _h = height;
         _d3d = D3D12.GetApi();
+        D3DCommon.RemovedReason = () => _dev != null ? _dev->GetDeviceRemovedReason() : 0;
         _dxgi = DXGI.GetApi(null, false);
         IDXGIFactory4* factory;
         var gf = IDXGIFactory4.Guid;
@@ -432,6 +433,12 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
         var a = (ID3D12CommandAllocator*)_alloc[_frame];
         a->Reset();
         _list->Reset(a, null);
+        BindCommon();
+        _drawSlot = 0;
+    }
+
+    private void BindCommon()
+    {
         var heap = _srvHeap;
         _list->SetDescriptorHeaps(1, &heap);
         _list->SetGraphicsRootSignature(_rootSig);
@@ -445,7 +452,20 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
         }
         _list->SetGraphicsRootDescriptorTable(5, SrvGpu(0));
         _list->SetComputeRootDescriptorTable(5, SrvGpu(0));
-        _drawSlot = 0;
+    }
+
+    /// <summary>
+    /// Sends what is recorded so far to the GPU and keeps recording the same frame. Smaller submissions keep slow
+    /// GPUs (and WARP) clear of the driver timeout, the same as the Flush calls in the Direct3D 11 backend.
+    /// The caller sets the pipeline, target and per-draw constants again afterwards.
+    /// </summary>
+    private void Split()
+    {
+        _list->Close();
+        var l = (ID3D12CommandList*)_list;
+        _queue->ExecuteCommandLists(1, &l);
+        _list->Reset((ID3D12CommandAllocator*)_alloc[_frame], null);
+        BindCommon();
     }
 
     private ulong Param(in SceneParams p)
@@ -502,6 +522,14 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
                 _list->IASetIndexBuffer(&ibv);
                 for (int b = 0; b < SceneMath.GeometryBatches; b++)
                 {
+                    if (b > 0)
+                    {
+                        Split();
+                        SetTarget(Rtv(0), true, _w, _h);
+                        _list->SetPipelineState((ID3D12PipelineState*)_geoPso);
+                        _list->IASetVertexBuffers(0, 1, &vbv);
+                        _list->IASetIndexBuffer(&ibv);
+                    }
                     _list->SetGraphicsRootConstantBufferView(0, Param(SceneMath.Geometry(time, _w, _h, b)));
                     _list->DrawIndexedInstanced(_sphereIndexCount, SceneMath.GeometryInstances / SceneMath.GeometryBatches, 0, 0, 0);
                 }
@@ -509,10 +537,12 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
             }
             case Core.Gpu.GpuScenes.Shading:
             {
-                _list->SetPipelineState((ID3D12PipelineState*)_shadePso);
-                _list->SetGraphicsRootConstantBufferView(0, Param(SceneMath.Shading(time, _w, _h)));
+                ulong cb = Param(SceneMath.Shading(time, _w, _h));
                 for (int i = 0; i < SceneMath.ShadingBands; i++)
                 {
+                    if (i > 0) { Split(); SetTarget(Rtv(0), true, _w, _h); }
+                    _list->SetPipelineState((ID3D12PipelineState*)_shadePso);
+                    _list->SetGraphicsRootConstantBufferView(0, cb);
                     int y0 = _h * i / SceneMath.ShadingBands, y1 = _h * (i + 1) / SceneMath.ShadingBands;
                     var band = new Box2D<int>(0, y0, _w, y1);
                     _list->RSSetScissorRects(1, &band);
@@ -534,6 +564,12 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
                 _list->SetGraphicsRootDescriptorTable(5, SrvGpu(0));
                 for (int layer = 0; layer < SceneMath.FillLayers; layer++)
                 {
+                    if (layer > 0 && layer % 10 == 0)
+                    {
+                        Split();
+                        SetTarget(Rtv(0), true, _w, _h);
+                        _list->SetPipelineState((ID3D12PipelineState*)_fillPso);
+                    }
                     _list->SetGraphicsRootConstantBufferView(0, Param(SceneMath.Fill(time, _w, _h, layer)));
                     _list->DrawInstanced(3, 1, 0, 0);
                 }
