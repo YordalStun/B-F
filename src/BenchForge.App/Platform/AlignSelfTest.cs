@@ -45,15 +45,38 @@ public static class AlignSelfTest
             select vdisk file="{vhd}"
             attach vdisk
             """);
-        long offset = style == "mbr" ? 63 * 512 : 20L * 1024 * 1024 + 3584;
-        PowerShell($$"""
+        // Starts that are 512-byte but not 4 KB multiples: MBR 1 MB + 3.5 KB, GPT 20 MB + 3.5 KB (past the reserved area).
+        long offset = (style == "mbr" ? 1L : 20L) * 1024 * 1024 + 3584;
+        const long size = 700L * 1024 * 1024;
+        var diskOut = PowerShell($$"""
             $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
             $d = Get-Disk | Where-Object { $_.Location -eq '{{vhd}}' }
             Write-Output ('Disk ' + $d.Number + ': logical sector ' + $d.LogicalSectorSize + ' bytes, physical ' + $d.PhysicalSectorSize)
+            Write-Output ('DISK=' + $d.Number)
             Initialize-Disk -Number $d.Number -PartitionStyle {{style.ToUpperInvariant()}}
-            $p = New-Partition -DiskNumber $d.Number -Offset {{offset}} -Size 700MB -DriveLetter {{letter}}
+            """);
+        int diskNo = int.Parse(diskOut.First(l => l.StartsWith("DISK=")).Substring(5));
+        bool made = TryPowerShell($$"""
+            $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+            $p = New-Partition -DiskNumber {{diskNo}} -Offset {{offset}} -Size {{size}} -DriveLetter {{letter}}
             Write-Output ('Partition created at offset ' + $p.Offset)
-            Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
+            """);
+        if (!made)
+        {
+            if (style != "mbr") throw new InvalidOperationException("Windows would not create a misaligned GPT partition");
+            // Windows' own tools insist on aligned starts. Old cloning tools wrote the partition table directly — do the same.
+            Log("Writing the MBR partition table directly (as old cloning tools did)");
+            WriteMbrPartition(diskNo, offset / 512, size / 512);
+            PowerShell($$"""
+                $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+                Update-Disk -Number {{diskNo}}
+                Get-Partition -DiskNumber {{diskNo}} | Select-Object -First 1 | Set-Partition -NewDriveLetter {{letter}}
+                Write-Output ('Partition at offset ' + (Get-Partition -DriveLetter {{letter}}).Offset)
+                """);
+        }
+        PowerShell($$"""
+            $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+            Format-Volume -DriveLetter {{letter}} -FileSystem NTFS -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
             """);
         try
         {
@@ -193,20 +216,48 @@ public static class AlignSelfTest
         finally { File.Delete(file); }
     }
 
-    private static void PowerShell(string script)
+    private static List<string> PowerShell(string script)
     {
-        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        var code = Run("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand {encoded}");
-        if (code != 0) throw new InvalidOperationException($"PowerShell setup failed ({code})");
+        var lines = new List<string>();
+        if (!TryPowerShell(script, lines)) throw new InvalidOperationException("PowerShell setup failed");
+        return lines;
     }
 
-    private static int Run(string exe, string args)
+    private static bool TryPowerShell(string script, List<string>? lines = null)
+    {
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        return Run("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand {encoded}", lines) == 0;
+    }
+
+    /// <summary>Writes one primary NTFS partition entry (type 0x07) into the MBR of a test disk.</summary>
+    private static void WriteMbrPartition(int disk, long startLba, long sectors)
+    {
+        using var h = File.OpenHandle($@"\\.\PhysicalDrive{disk}", FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var mbr = new byte[512];
+        RandomAccess.Read(h, mbr, 0);
+        Array.Clear(mbr, 446, 64);
+        mbr[446] = 0x00; mbr[450] = 0x07;
+        // CHS fields are unused by Windows for LBA disks; fill with the usual "beyond 8 GB" values.
+        mbr[447] = mbr[451] = 0xFE; mbr[448] = mbr[452] = 0xFF; mbr[449] = mbr[453] = 0xFF;
+        BitConverter.GetBytes((uint)startLba).CopyTo(mbr, 454);
+        BitConverter.GetBytes((uint)sectors).CopyTo(mbr, 458);
+        mbr[510] = 0x55; mbr[511] = 0xAA;
+        RandomAccess.Write(h, mbr, 0);
+        RandomAccess.FlushToDisk(h);
+    }
+
+    private static int Run(string exe, string args, List<string>? lines = null)
     {
         var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         using var p = Process.Start(psi)!;
         var output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
         p.WaitForExit();
-        foreach (var line in output.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l))) Log("  " + line.TrimEnd());
+        foreach (var line in output.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l)))
+        {
+            lines?.Add(line.Trim());
+            if (!line.StartsWith("#< CLIXML") && !line.StartsWith("<Objs")) Log("  " + line.TrimEnd());
+            else if (line.Contains("S=\"Error\"")) Log("  " + System.Text.RegularExpressions.Regex.Replace(line, "<[^>]+>|_x000D__x000A_", " ").Trim());
+        }
         return p.ExitCode;
     }
 

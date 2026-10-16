@@ -25,6 +25,11 @@ public sealed class GpuMessage
     [JsonPropertyName("version")] public string? Version { get; set; }
     [JsonPropertyName("width")] public int Width { get; set; }
     [JsonPropertyName("height")] public int Height { get; set; }
+    /// <summary>Graphics API the worker runs on (see <see cref="GpuApis"/>).</summary>
+    [JsonPropertyName("api")] public string? Api { get; set; }
+    /// <summary>PCIe transfer test: GB/s from PC to graphics card and back.</summary>
+    [JsonPropertyName("upGBs")] public double UploadGBs { get; set; }
+    [JsonPropertyName("downGBs")] public double DownloadGBs { get; set; }
 
     private static readonly JsonSerializerOptions Opts = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingDefault };
 
@@ -37,6 +42,25 @@ public sealed class GpuMessage
     }
 }
 
+/// <summary>Graphics APIs the 3D test can run on. The same scenes and work per frame run on each.</summary>
+public static class GpuApis
+{
+    public const string OpenGL = "gl";
+    public const string D3D11 = "dx11";
+    public const string D3D12 = "dx12";
+    public const string Vulkan = "vulkan";
+    public static readonly string[] All = { D3D12, D3D11, Vulkan, OpenGL };
+
+    public static string Display(string api) => api switch
+    {
+        OpenGL => "OpenGL 4.3",
+        D3D11 => "DirectX 11",
+        D3D12 => "DirectX 12",
+        Vulkan => "Vulkan",
+        _ => api,
+    };
+}
+
 public static class GpuScenes
 {
     public const string Geometry = "Geometry";
@@ -44,6 +68,7 @@ public static class GpuScenes
     public const string Compute = "Compute";
     public const string Fill = "Fill-rate";
     public const string Vram = "VRAM check";
+    public const string Pcie = "PCIe transfer";
 
     public static readonly string[] Benchmark = { Geometry, Shading, Compute, Fill };
 
