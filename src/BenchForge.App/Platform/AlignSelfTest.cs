@@ -56,24 +56,34 @@ public static class AlignSelfTest
             Initialize-Disk -Number $d.Number -PartitionStyle {{style.ToUpperInvariant()}}
             """);
         int diskNo = int.Parse(diskOut.First(l => l.StartsWith("DISK=")).Substring(5));
-        bool made = TryPowerShell($$"""
-            $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
-            $p = New-Partition -DiskNumber {{diskNo}} -Offset {{offset}} -Size {{size}} -DriveLetter {{letter}}
-            Write-Output ('Partition created at offset ' + $p.Offset)
-            """);
-        if (!made)
+        // Windows' own tools silently round partition starts to 1 MB, so — like the old cloning tools that caused this
+        // problem — the test edits the partition table directly.
+        if (style == "mbr")
         {
-            if (style != "mbr") throw new InvalidOperationException("Windows would not create a misaligned GPT partition");
-            // Windows' own tools insist on aligned starts. Old cloning tools wrote the partition table directly — do the same.
-            Log("Writing the MBR partition table directly (as old cloning tools did)");
+            Log("Writing the MBR partition table directly");
             WriteMbrPartition(diskNo, offset / 512, size / 512);
+        }
+        else
+        {
             PowerShell($$"""
                 $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
-                Update-Disk -Number {{diskNo}}
-                Get-Partition -DiskNumber {{diskNo}} | Select-Object -First 1 | Set-Partition -NewDriveLetter {{letter}}
-                Write-Output ('Partition at offset ' + (Get-Partition -DriveLetter {{letter}}).Offset)
+                New-Partition -DiskNumber {{diskNo}} -Offset {{offset - 3584}} -Size {{size}} -GptType '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' | Out-Null
+                Set-Disk -Number {{diskNo}} -IsOffline $true
+                """);
+            Log("Moving the GPT partition start by 3.5 KB directly in the partition table");
+            ShiftGptPartition(diskNo, (offset - 3584) / 512, 7);
+            PowerShell($$"""
+                $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+                Set-Disk -Number {{diskNo}} -IsOffline $false
                 """);
         }
+        PowerShell($$"""
+            $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+            Update-Disk -Number {{diskNo}}
+            $p = Get-Partition -DiskNumber {{diskNo}} | Where-Object { $_.Type -ne 'Reserved' } | Sort-Object Size -Descending | Select-Object -First 1
+            $p | Set-Partition -NewDriveLetter {{letter}}
+            Write-Output ('Partition at offset ' + (Get-Partition -DriveLetter {{letter}}).Offset)
+            """);
         PowerShell($$"""
             $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
             Format-Volume -DriveLetter {{letter}} -FileSystem NTFS -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
@@ -243,6 +253,40 @@ public static class AlignSelfTest
         BitConverter.GetBytes((uint)sectors).CopyTo(mbr, 458);
         mbr[510] = 0x55; mbr[511] = 0xAA;
         RandomAccess.Write(h, mbr, 0);
+        RandomAccess.FlushToDisk(h);
+    }
+
+    /// <summary>Moves the start of the GPT partition that begins at <paramref name="startLba"/> by <paramref name="sectors"/>, updating both GPT copies and their checksums.</summary>
+    private static void ShiftGptPartition(int disk, long startLba, int sectors)
+    {
+        using var h = File.OpenHandle($@"\\.\PhysicalDrive{disk}", FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var primary = new byte[512];
+        RandomAccess.Read(h, primary, 512);
+        long backupLba = BitConverter.ToInt64(primary, 32);
+        foreach (long headerLba in new[] { 1L, backupLba })
+        {
+            var hdr = new byte[512];
+            RandomAccess.Read(h, hdr, headerLba * 512);
+            if (System.Text.Encoding.ASCII.GetString(hdr, 0, 8) != "EFI PART") throw new InvalidOperationException("GPT header not found at LBA " + headerLba);
+            long entriesLba = BitConverter.ToInt64(hdr, 72);
+            int count = BitConverter.ToInt32(hdr, 80), size = BitConverter.ToInt32(hdr, 84);
+            var entries = new byte[count * size];
+            RandomAccess.Read(h, entries, entriesLba * 512);
+            bool found = false;
+            for (int i = 0; i < count; i++)
+                if (BitConverter.ToInt64(entries, i * size + 32) == startLba)
+                {
+                    BitConverter.GetBytes(startLba + sectors).CopyTo(entries, i * size + 32);
+                    found = true;
+                }
+            if (!found) throw new InvalidOperationException("partition entry not found");
+            BitConverter.GetBytes(System.IO.Hashing.Crc32.HashToUInt32(entries)).CopyTo(hdr, 88);
+            int hsize = BitConverter.ToInt32(hdr, 12);
+            BitConverter.GetBytes(0u).CopyTo(hdr, 16);
+            BitConverter.GetBytes(System.IO.Hashing.Crc32.HashToUInt32(hdr.AsSpan(0, hsize))).CopyTo(hdr, 16);
+            RandomAccess.Write(h, entries, entriesLba * 512);
+            RandomAccess.Write(h, hdr, headerLba * 512);
+        }
         RandomAccess.FlushToDisk(h);
     }
 
