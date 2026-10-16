@@ -250,11 +250,12 @@ public sealed class WindowsAlignOps : IAlignOps
         bool removed = !deletesFirst;
         string? lastError = null;
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        int code = await FixRunner.RunProcess("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}", line =>
+        int code = await FixRunner.RunProcess("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand {encoded}", line =>
         {
             if (line == PartitionAlign.RemovedMarker) { removed = true; log("  Old partition removed."); }
             else if (line.StartsWith(PartitionAlign.OffsetMarker) && long.TryParse(line[PartitionAlign.OffsetMarker.Length..], out var o)) offset = o;
-            else { log("  " + line); lastError = line; }
+            else if (line.StartsWith(PartitionAlign.ErrorMarker)) { lastError = line[PartitionAlign.ErrorMarker.Length..]; log("  Error: " + lastError); }
+            else if (!line.StartsWith("#< CLIXML") && !line.StartsWith("<Objs")) log("  " + line);
         }, CancellationToken.None, Encoding.UTF8);
         return new RecreateResult(code == 0 ? offset : null, deletesFirst ? removed : true, code == 0 ? null : lastError ?? $"PowerShell exit code {code}");
     }

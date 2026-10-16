@@ -48,6 +48,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
             new() { Key = "burn", Title = "Burn test", Glyph = "", Description = "Hammer the parts you pick at 100% at the same time for as long as you like." },
             new() { Key = "rotation", Title = "Stability rotation", Glyph = "", Description = "Each part alone, then all together, repeating — finds which part is unstable." },
             new() { Key = "overnight", Title = "Overnight", Glyph = "", Description = "Benchmark, hours of stability testing, then benchmark again to spot heat/ageing drops." },
+            new() { Key = "crash", Title = "Crash finder", Glyph = "\uE7BA", Description = "Finds crashes normal stress tests miss: each core alone at full boost, idle / light load, and power-supply load spikes." },
             new() { Key = "drive", Title = "Drive health check", Glyph = "\uEDA2", Description = "Deep drive test: benchmark, full surface scan for bad sectors and the write-cache test, per drive." },
             new() { Key = "single", Title = "One part", Glyph = "", Description = "Benchmark or stress just the CPU, RAM, drive or GPU." },
             new() { Key = "custom", Title = "Custom plan", Glyph = "", Description = "Build your own list of steps, and loop it." },
@@ -94,6 +95,11 @@ public sealed partial class RunSetupViewModel : PageViewModel
     public StepKind[] Kinds { get; } = Enum.GetValues<StepKind>();
     [ObservableProperty] private Component _singleComponent = Component.Cpu;
     [ObservableProperty] private StepKind _singleKind = StepKind.Stress;
+    // Crash finder
+    [ObservableProperty] private bool _crashCoreCycle = true;
+    [ObservableProperty] private bool _crashLightLoad = true;
+    [ObservableProperty] private bool _crashPsuSpikes = true;
+    [ObservableProperty] private bool _isCrash;
     // Drive health check
     public ObservableCollection<DriveChoice> DriveChoices { get; } = new();
     [ObservableProperty] private int _driveMinutes = 20;
@@ -160,7 +166,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
     private bool _rebuilding;
     private void OnAnyChanged(object? s, PropertyChangedEventArgs e)
     {
-        if (_rebuilding || e.PropertyName is nameof(TotalText) or nameof(FinishText) or nameof(PlanWarning) or nameof(NeedsDuration) or nameof(NeedsParts) or nameof(IsSingle) or nameof(IsCustom) or nameof(IsDrive)) return;
+        if (_rebuilding || e.PropertyName is nameof(TotalText) or nameof(FinishText) or nameof(PlanWarning) or nameof(NeedsDuration) or nameof(NeedsParts) or nameof(IsSingle) or nameof(IsCustom) or nameof(IsDrive) or nameof(IsCrash)) return;
         Rebuild();
     }
 
@@ -194,6 +200,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
             "burn" => BurnParts().Count == 0 ? null : PlanPresets.BurnIn(dur, BurnParts(), s),
             "rotation" => PlanPresets.StabilityRotation(dur, s),
             "overnight" => PlanPresets.Overnight(dur, s),
+            "crash" => CrashCoreCycle || CrashLightLoad || CrashPsuSpikes ? PlanPresets.CrashFinder(dur, CrashCoreCycle, CrashLightLoad, CrashPsuSpikes, s) : null,
             "drive" => DriveChoices.Any(d => d.IsChecked)
                 ? PlanPresets.DriveHealthCheck(TimeSpan.FromMinutes(Math.Max(3, DriveMinutes)), DriveChoices.Where(d => d.IsChecked).Select(d => d.Drive).ToList(), s)
                 : null,
@@ -215,14 +222,15 @@ public sealed partial class RunSetupViewModel : PageViewModel
         try
         {
             var key = Selected?.Key;
-            NeedsDuration = key is "burn" or "rotation" or "overnight" || (key == "single" && SingleKind == StepKind.Stress);
+            NeedsDuration = key is "burn" or "rotation" or "overnight" or "crash" || (key == "single" && SingleKind == StepKind.Stress);
             NeedsParts = key == "burn";
             IsSingle = key == "single";
             IsCustom = key == "custom";
             IsDrive = key == "drive";
+            IsCrash = key == "crash";
             Preview.Clear();
             var plan = BuildPlan();
-            PlanWarning = plan == null ? (key == "burn" ? "Pick at least one part to stress." : key == "custom" ? "Add at least one step." : key == "drive" ? "Pick at least one drive." : null) : null;
+            PlanWarning = plan == null ? (key == "burn" ? "Pick at least one part to stress." : key == "custom" ? "Add at least one step." : key == "drive" ? "Pick at least one drive." : key == "crash" ? "Pick at least one test." : null) : null;
             if (plan == null) { TotalText = ""; FinishText = ""; return; }
             var steps = plan.Expand();
             // Long plans: show the first steps and a summary line.

@@ -1153,3 +1153,69 @@ public class PartitionAlignTests
         Assert.Contains("not free any more", m);
     }
 }
+
+public class StabilityTestTests
+{
+    [Fact]
+    public void Spike_schedule_alternates_and_counts_jumps()
+    {
+        Assert.True(PsuSpikeSchedule.IsOn(0.5));
+        Assert.False(PsuSpikeSchedule.IsOn(1.5));
+        Assert.True(PsuSpikeSchedule.IsOn(2.5));
+        Assert.False(PsuSpikeSchedule.IsOn(-1));
+        double cycle = PsuSpikeSchedule.Pattern.Sum();
+        Assert.Equal(PsuSpikeSchedule.Pattern.Length / 2, PsuSpikeSchedule.Spikes(cycle - 0.01));
+        Assert.Equal(PsuSpikeSchedule.IsOn(3.3), PsuSpikeSchedule.IsOn(3.3 + cycle)); // repeats
+    }
+
+    [Fact]
+    public void Core_cycler_gives_every_core_time_and_more_rounds_when_long()
+    {
+        var (r1, s1) = Cpu.CpuStability.CyclePlan(600, 16);
+        Assert.Equal(1, r1);
+        Assert.Equal(37.5, s1, 3);
+        var (r2, s2) = Cpu.CpuStability.CyclePlan(4 * 3600, 16);
+        Assert.Equal(15, r2);
+        Assert.True(s2 >= 60);
+        var (_, s3) = Cpu.CpuStability.CyclePlan(30, 64);
+        Assert.Equal(Cpu.CpuStability.MinSlotSeconds, s3);
+    }
+
+    [Fact]
+    public void Crash_finder_plan_shares_time_and_tags_steps()
+    {
+        var plan = PlanPresets.CrashFinder(TimeSpan.FromHours(2), true, true, true);
+        Assert.Equal(3, plan.Steps.Count);
+        Assert.Equal(3600, plan.Steps.Single(s => s.Variant == StepVariants.CoreCycle).DurationSeconds, 0);
+        var spike = plan.Steps.Single(s => s.Variant == StepVariants.PsuSpike);
+        Assert.Contains(Component.Gpu, spike.Components);
+        Assert.Single(PlanPresets.CrashFinder(TimeSpan.FromHours(1), false, true, false).Steps);
+    }
+
+    private static RunResult WithStep(string variant, string status, ModuleResult cpu) => new()
+    {
+        Status = RunStatus.Completed,
+        Steps = { new StepResult { Name = "x", Variant = variant, Status = status, Components = { Component.Cpu }, Modules = { cpu } } },
+    };
+
+    [Fact]
+    public void Core_errors_become_a_critical_finding_with_advice()
+    {
+        var cpu = new ModuleResult { Component = Component.Cpu, Kind = StepKind.Stress, ErrorCount = 3 };
+        cpu.SubScores.Add(new SubScore { Name = "Core 0", Group = "Per core", Value = 400 });
+        cpu.SubScores.Add(new SubScore { Name = "Core 5", Group = "Per core", Value = 410, Detail = "3 calculation errors" });
+        var r = WithStep(StepVariants.CoreCycle, "Passed", cpu);
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Severity == Severity.Critical && f.Title.StartsWith("Core 5 made calculation errors"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Fix single-core / light-load instability");
+    }
+
+    [Fact]
+    public void Shutdown_during_spike_test_points_at_the_power_supply()
+    {
+        var r = new RunResult { Status = RunStatus.Crashed, Crash = new CrashInfo { StepName = StepVariants.PsuSpikeName, Summary = "PC restarted" } };
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title.Contains("load-spike test"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Check the power supply");
+    }
+}

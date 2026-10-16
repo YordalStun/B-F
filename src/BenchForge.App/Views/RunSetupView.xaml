@@ -76,6 +76,24 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Crash finder -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding IsCrash, Converter={StaticResource Vis}}">
+                    <StackPanel>
+                        <TextBlock Text="Tests to run" Style="{StaticResource H2}" />
+                        <CheckBox IsChecked="{Binding CrashCoreCycle}" Margin="0,2">
+                            <TextBlock TextWrapping="Wrap"><Run FontWeight="SemiBold" Text="Core cycler" /><Run Text=" — one heavy thread on each core in turn at full boost. Finds unstable undervolts / Curve Optimizer settings and weak cores." /></TextBlock>
+                        </CheckBox>
+                        <CheckBox IsChecked="{Binding CrashLightLoad}" Margin="0,2">
+                            <TextBlock TextWrapping="Wrap"><Run FontWeight="SemiBold" Text="Idle / light load" /><Run Text=" — mostly idle with short bursts, like browsing. Finds crashes that only happen when the PC is doing little." /></TextBlock>
+                        </CheckBox>
+                        <CheckBox IsChecked="{Binding CrashPsuSpikes}" Margin="0,2">
+                            <TextBlock TextWrapping="Wrap"><Run FontWeight="SemiBold" Text="Power-supply load spikes" /><Run Text=" — CPU and GPU jump between idle and full load together. Finds power supplies that switch the PC off." /></TextBlock>
+                        </CheckBox>
+                        <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                   Text="Half the time goes to the core cycler (it needs the longest), the rest is shared. 1–2 hours is a good start; leave it overnight for undervolt tuning." />
+                    </StackPanel>
+                </Border>
+
                 <!-- Drive health check -->
                 <Border Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="{Binding IsDrive, Converter={StaticResource Vis}}">
                     <StackPanel>

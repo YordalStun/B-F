@@ -92,7 +92,10 @@ public static class PlanPresets
         var quick = QuickBenchmark(s);
         var plan = new TestPlan { Name = $"Overnight ({TimeFormat.Short(stressDuration)} stability)", Description = "Benchmark, long stability rotation, then benchmark again to compare.", Settings = s ?? new() };
         plan.Steps.AddRange(quick.Steps.Select(x => new TestStep(x.Name + " (before)", x.Kind, x.DurationSeconds, x.Components.ToArray())));
-        plan.Steps.AddRange(StabilityRotation(stressDuration, s).Steps);
+        // A share of the night goes to the core cycler, which finds single-core instability the rotation can't.
+        double cycle = Math.Clamp(stressDuration.TotalSeconds * 0.2, 0, 3 * 3600);
+        if (cycle >= 600) plan.Steps.Add(new TestStep(StepVariants.CoreCycleName, StepKind.Stress, cycle, Component.Cpu) { Variant = StepVariants.CoreCycle });
+        plan.Steps.AddRange(StabilityRotation(stressDuration - TimeSpan.FromSeconds(cycle >= 600 ? cycle : 0), s).Steps);
         plan.Steps.AddRange(quick.Steps.Select(x => new TestStep(x.Name + " (after)", x.Kind, x.DurationSeconds, x.Components.ToArray())));
         return plan;
     }
@@ -110,6 +113,23 @@ public static class PlanPresets
             plan.Steps.Add(new TestStep($"Drive benchmark {label}", StepKind.Benchmark, 92, Component.Storage) { Target = d });
             plan.Steps.Add(new TestStep($"Drive health check {label}", StepKind.Stress, health, Component.Storage) { Target = d, Variant = StepVariants.DriveHealth });
         }
+        return plan;
+    }
+
+    /// <summary>
+    /// Tests that catch crashes full-load tests miss: single cores at max boost, idle/light load, and power-supply load spikes.
+    /// The time is shared out between the chosen tests.
+    /// </summary>
+    public static TestPlan CrashFinder(TimeSpan duration, bool coreCycle, bool lightLoad, bool psuSpikes, TestSettings? s = null)
+    {
+        var parts = new List<(string Name, string Variant, double Weight, Component[] Comps)>();
+        if (coreCycle) parts.Add((StepVariants.CoreCycleName, StepVariants.CoreCycle, 2, new[] { Component.Cpu }));
+        if (lightLoad) parts.Add((StepVariants.LightLoadName, StepVariants.LightLoad, 1, new[] { Component.Cpu }));
+        if (psuSpikes) parts.Add((StepVariants.PsuSpikeName, StepVariants.PsuSpike, 1, new[] { Component.Cpu, Component.Gpu }));
+        var plan = new TestPlan { Name = $"Crash finder {TimeFormat.Short(duration)}", Description = "Single-core boost, idle / light load and power-supply load spikes.", Settings = s ?? new() };
+        double weights = parts.Sum(p => p.Weight);
+        foreach (var (name, variant, weight, comps) in parts)
+            plan.Steps.Add(new TestStep(name, StepKind.Stress, Math.Max(60, duration.TotalSeconds * weight / weights), comps) { Variant = variant });
         return plan;
     }
 

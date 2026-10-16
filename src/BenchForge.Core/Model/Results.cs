@@ -57,6 +57,8 @@ public sealed class StepResult
     public string Name { get; set; } = "";
     public StepKind Kind { get; set; }
     public List<Component> Components { get; set; } = new();
+    /// <summary>Special test flavour (see StepVariants), if any.</summary>
+    public string? Variant { get; set; }
     public double PlannedSeconds { get; set; }
     public DateTime Start { get; set; }
     public DateTime? End { get; set; }

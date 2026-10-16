@@ -115,6 +115,23 @@ public sealed class GpuModule : ITestModule
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
 
+        // PSU spike test: switch the GPU on and off together with the CPU (same schedule, same clock).
+        var spikeTask = ctx.Step.Variant == StepVariants.PsuSpike ? Task.Run(async () =>
+        {
+            bool? sent = null;
+            while (!proc.HasExited && !ctx.Token.IsCancellationRequested)
+            {
+                bool on = PsuSpikeSchedule.IsOn(ctx.Elapsed.TotalSeconds);
+                if (sent != on)
+                {
+                    try { proc.StandardInput.WriteLine(on ? "resume" : "pause"); proc.StandardInput.Flush(); } catch { break; }
+                    sent = on;
+                }
+                await Task.Delay(10);
+            }
+        }) : Task.CompletedTask;
+        if (ctx.Step.Variant == StepVariants.PsuSpike) result.Info["Load pattern"] = "On/off in step with the CPU (power-supply spike test)";
+
         bool hung = false;
         while (!proc.HasExited)
         {

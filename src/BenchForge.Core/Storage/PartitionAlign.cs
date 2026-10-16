@@ -108,6 +108,11 @@ public static class PartitionAlign
     /// <summary>Printed by the recreate script right after the old partition is gone — from then on the backup is the only copy.</summary>
     public const string RemovedMarker = "BF-REMOVED";
     public const string OffsetMarker = "NEWOFFSET=";
+    public const string ErrorMarker = "BF-ERROR=";
+
+    /// <summary>Wraps a script so errors come back as one plain line and progress bars don't flood the output.</summary>
+    private static string Wrap(string body) =>
+        "$ErrorActionPreference = 'Stop'\n$ProgressPreference = 'SilentlyContinue'\ntry {\n" + body + "} catch {\n  Write-Output ('" + ErrorMarker + "' + $_.Exception.Message)\n  exit 1\n}\n";
 
     /// <summary>
     /// PowerShell that deletes the partition and creates the aligned one in the same place, keeping letter, type, file system and label.
@@ -117,13 +122,12 @@ public static class PartitionAlign
     public static string RecreateScript(PartitionEntry p)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("$ErrorActionPreference = 'Stop'");
         sb.AppendLine($"$old = Get-Partition -DriveLetter {p.DriveLetter}");
         sb.AppendLine($"if ($old.DiskNumber -ne {p.DiskNumber} -or $old.Offset -ne {p.Offset} -or $old.Size -ne {p.Size}) {{ throw ('The partition changed since it was checked (disk ' + $old.DiskNumber + ', offset ' + $old.Offset + ', size ' + $old.Size + '). Nothing was deleted.') }}");
         sb.AppendLine("$old | Remove-Partition -Confirm:$false");
         sb.AppendLine($"Write-Output '{RemovedMarker}'");
         AppendCreate(sb, p);
-        return sb.ToString();
+        return Wrap(sb.ToString());
     }
 
     /// <summary>
@@ -134,12 +138,11 @@ public static class PartitionAlign
     {
         var (offset, size) = NewLayout(p.Offset, p.Size);
         var sb = new StringBuilder();
-        sb.AppendLine("$ErrorActionPreference = 'Stop'");
         sb.AppendLine($"if (Get-Partition | Where-Object {{ $_.DriveLetter -eq '{p.DriveLetter}' }}) {{ throw 'Drive letter {p.DriveLetter} is in use. Nothing was changed.' }}");
         sb.AppendLine($"$busy = Get-Partition -DiskNumber {p.DiskNumber} | Where-Object {{ ($_.Offset -lt {offset + size}) -and (($_.Offset + $_.Size) -gt {offset}) }}");
         sb.AppendLine("if ($busy) { throw 'That space on the disk is not free any more. Nothing was changed.' }");
         AppendCreate(sb, p);
-        return sb.ToString();
+        return Wrap(sb.ToString());
     }
 
     private static void AppendCreate(StringBuilder sb, PartitionEntry p)

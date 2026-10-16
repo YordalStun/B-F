@@ -23,6 +23,18 @@ public static class RecommendationEngine
         var f = r.Findings;
         bool Has(Func<Finding, bool> p) => f.Any(p);
 
+        if (Has(x => x.Title.Contains("at single-core boost") || x.Title == "CPU made errors at idle / light load"))
+            Add(Severity.Critical, Component.Cpu, "Fix single-core / light-load instability", "Some cores fail when running alone at full boost or at light load, which an all-core test can't show.",
+                "If you use PBO Curve Optimizer or an undervolt: make the failing cores' values less negative (e.g. −30 → −20) and run the core cycler again",
+                "If you don't: load BIOS defaults and update the BIOS — boost and voltage fixes often ship as BIOS updates",
+                "Repeat the core cycler until every core passes a few rounds",
+                "If one core fails even at stock settings, the CPU may be faulty — consider a warranty claim");
+        if (Has(x => x.Title == "The PC shut down during the power-supply load-spike test"))
+            Add(Severity.Critical, null, "Check the power supply", "The PC switched off when CPU and GPU load jumped together — typical of a weak or failing power supply.",
+                "Make sure the GPU uses separate PCIe power cables from the PSU (not one daisy-chained cable)",
+                "Check the PSU wattage is comfortably above CPU + GPU peak power (see the power figures in this report)",
+                "Try another known-good power supply if you can; ageing PSUs lose capacity",
+                "Look in Event Viewer for 'Kernel-Power 41' with no blue screen — that matches a power cut");
         if (Has(x => x.Component == Component.Cpu && x.Title.Contains("wrong results")))
             Add(Severity.Critical, Component.Cpu, "Make the CPU stable", "The CPU made calculation errors under load.",
                 "Load BIOS defaults: remove CPU overclocks, undervolts, PBO/Curve Optimizer or Intel 'Turbo' tweaks",

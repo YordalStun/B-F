@@ -36,13 +36,15 @@ public static class AlignSelfTest
         Log($"===== {style.ToUpperInvariant()} disk =====");
         var vhd = Path.Combine(dir, $"bf-align-{style}.vhdx");
         char letter = FreeLetter();
-        // offset=31 KB → 31,744 bytes: the classic misaligned start (not a multiple of 4,096).
+        // align=1 stops diskpart rounding the start up to 64 KB. MBR: 31 KB (31,744 bytes, like old XP-era layouts);
+        // GPT: just past the reserved (MSR) area at 20 MB + 3 KB. Neither is a multiple of 4,096.
+        string offsetKb = style == "mbr" ? "31" : "20483";
         Diskpart($"""
             create vdisk file="{vhd}" maximum=1024 type=expandable
             select vdisk file="{vhd}"
             attach vdisk
             convert {style}
-            create partition primary offset=31 size=700
+            create partition primary offset={offsetKb} size=700 align=1
             format fs=ntfs quick label="BF Test"
             assign letter={letter}
             """);
@@ -108,7 +110,7 @@ public static class AlignSelfTest
             // Things tied to the drive must block the automatic fix.
             Directory.CreateDirectory(Path.Combine(root, "WindowsApps"));
             var blocked = PartitionReader.Read(null).First(p => p.DriveLetter == letter);
-            blocked.Offset = part.Offset; // pretend it is still misaligned
+            blocked.Offset += 512; // pretend it is still misaligned
             var v2 = PartitionAlign.Check(blocked);
             Check(!v2.CanAutoFix && v2.Reason.Contains("Store"), $"Store-app folder blocks the fix ({v2.Reason})");
         }

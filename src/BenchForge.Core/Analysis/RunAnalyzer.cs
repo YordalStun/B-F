@@ -16,6 +16,7 @@ public static class RunAnalyzer
         Errors(r, f);
         Performance(r, f);
         Power(r, f);
+        StabilityTests(r, f);
         r.Findings = f.OrderByDescending(x => x.Severity).ToList();
         r.Recommendations = RecommendationEngine.Build(r);
     }
@@ -368,6 +369,59 @@ public static class RunAnalyzer
             });
         if (hw.TrimEnabled == false && hw.Disks.Any(d => d.MediaType == "SSD"))
             f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = "TRIM is turned off", Detail = "Without TRIM, SSDs slow down over time and wear faster." });
+    }
+
+    /// <summary>Core cycler, light-load and load-spike results.</summary>
+    private static void StabilityTests(RunResult r, List<Finding> f)
+    {
+        foreach (var step in r.Steps)
+        {
+            var cpu = step.Modules.FirstOrDefault(m => m.Component == Component.Cpu);
+            if (cpu == null) continue;
+            switch (step.Variant)
+            {
+                case StepVariants.CoreCycle:
+                {
+                    var bad = cpu.SubScores.Where(s => s.Group == "Per core" && s.Detail != null).Select(s => s.Name).ToList();
+                    if (bad.Count > 0)
+                        f.Add(new Finding
+                        {
+                            Severity = Severity.Critical, Component = Component.Cpu,
+                            Title = $"{string.Join(", ", bad)} made calculation errors at single-core boost",
+                            Detail = "These cores fail when running alone at their highest clock — the classic sign of a too-aggressive undervolt / Curve Optimizer value, or a weak core. " + (cpu.Info.TryGetValue("Errors by core", out var e) ? e : ""),
+                        });
+                    else if (cpu.SubScores.Any(s => s.Group == "Per core"))
+                        f.Add(new Finding { Severity = Severity.Info, Component = Component.Cpu, Title = "Every core passed the core cycler", Detail = cpu.Info.GetValueOrDefault("Time per core", "") + " per core at single-core boost, no errors." });
+                    var perCore = cpu.SubScores.Where(s => s.Group == "Per core" && s.Value > 0).ToList();
+                    if (perCore.Count > 1)
+                    {
+                        var slow = perCore.MinBy(s => s.Value)!; double best = perCore.Max(s => s.Value);
+                        // Cores of different types (P/E cores, CCDs) differ a lot; only flag a single outlier among similar cores.
+                        double median = perCore.Select(s => s.Value).OrderBy(v => v).ElementAt(perCore.Count / 2);
+                        if (slow.Value < median * 0.75 && perCore.Count(s => s.Value < median * 0.75) <= Math.Max(1, perCore.Count / 8))
+                            f.Add(new Finding { Severity = Severity.Warning, Component = Component.Cpu, Title = $"{slow.Name} is much slower than the others", Detail = $"{slow.Value:0} vs typically {median:0} pts/s. That core may be throttling, parked, or held back by a BIOS/firmware setting." });
+                    }
+                    break;
+                }
+                case StepVariants.LightLoad when cpu.ErrorCount > 0:
+                    f.Add(new Finding
+                    {
+                        Severity = Severity.Critical, Component = Component.Cpu, Title = "CPU made errors at idle / light load",
+                        Detail = "Errors that appear only at light load point to an undervolt or Curve Optimizer value that is too low for low-load (high boost, low voltage) conditions, or to power-saving states. " + cpu.Info.GetValueOrDefault("Errors by core", ""),
+                    });
+                    break;
+                case StepVariants.PsuSpike:
+                    if (step.Status.Contains("Pass", StringComparison.OrdinalIgnoreCase) || step.Status.Contains("Complete", StringComparison.OrdinalIgnoreCase))
+                        f.Add(new Finding { Severity = Severity.Info, Title = "Power supply handled the load spikes", Detail = $"{cpu.SubScores.FirstOrDefault(s => s.Name == "Load spikes survived")?.Value ?? 0:0} jumps between idle and full CPU + GPU load without a shutdown." });
+                    break;
+            }
+        }
+        if (r.Crash?.StepName == StepVariants.PsuSpikeName)
+            f.Add(new Finding
+            {
+                Severity = Severity.Critical, Title = "The PC shut down during the power-supply load-spike test",
+                Detail = "Sudden jumps from idle to full CPU + GPU load are exactly what weak, ageing or overloaded power supplies can't handle (their protection switches the PC off). Suspect the power supply first.",
+            });
     }
 
     private static void Power(RunResult r, List<Finding> f)

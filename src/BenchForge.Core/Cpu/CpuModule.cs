@@ -12,8 +12,15 @@ public sealed class CpuModule : ITestModule
     private const int Seeds = 8;
     public Component Component => Component.Cpu;
 
-    public Task<ModuleResult> RunAsync(StepContext ctx) =>
-        ctx.Kind == StepKind.Benchmark ? Task.FromResult(Benchmark(ctx)) : Task.FromResult(Stress(ctx));
+    public Task<ModuleResult> RunAsync(StepContext ctx) => Task.FromResult(
+        ctx.Kind == StepKind.Benchmark ? Benchmark(ctx)
+        : ctx.Step.Variant switch
+        {
+            StepVariants.CoreCycle => CpuStability.CoreCycle(ctx),
+            StepVariants.LightLoad => CpuStability.LightLoad(ctx),
+            StepVariants.PsuSpike => CpuStability.PsuSpike(ctx),
+            _ => Stress(ctx),
+        });
 
     /// <summary>Known-good checksums, computed twice and confirmed before testing starts.</summary>
     public static ulong[] ReferenceChecksums(CpuKernel k)

@@ -195,6 +195,12 @@ public static class CrashAnalyzer
             ex.Add($"It happened {Model.TimeFormat.Short(TimeSpan.FromSeconds(c.RunElapsedSeconds))} into the run, during \"{c.StepName}\" ({(c.StepKind == StepKind.Stress ? "stressing" : "benchmarking")} {comps}).");
             if (c.ActiveComponents.Count == 1) Vote(c.ActiveComponents[0], 2);
             else foreach (var comp in c.ActiveComponents) Vote(comp, 0.5);
+            if (c.StepName == StepVariants.PsuSpikeName)
+                ex.Add("That step switches CPU and GPU between idle and full load together. A shutdown there usually means the power supply could not handle the sudden jump in power.");
+            else if (c.StepName == StepVariants.LightLoadName)
+                ex.Add("That step keeps the PC mostly idle with short bursts — crashes there point to undervolt / Curve Optimizer settings or power-saving states rather than heat.");
+            else if (c.StepName == StepVariants.CoreCycleName)
+                ex.Add("That step runs one heavy thread on one core at a time at full boost — crashes there point to an unstable core (undervolt / Curve Optimizer) rather than heat or power.");
         }
 
         // Temperatures and power right before the crash.

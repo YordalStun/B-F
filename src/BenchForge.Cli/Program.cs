@@ -58,6 +58,15 @@ TestPlan plan = argList[0] switch
     "bench" => new TestPlan { Name = "bench", Settings = settings, Steps = { PlanPresets.QuickBenchmark().Steps.First(s => s.Components.Contains(Parse(argList[1]))) } },
     "health" => PlanPresets.DriveHealthCheck(TimeSpan.FromSeconds(double.Parse(argList[1], CultureInfo.InvariantCulture)), new[] { Path.GetTempPath() }, settings),
     "stress" => new TestPlan { Name = "stress", Settings = settings, Steps = { new TestStep("Stress", StepKind.Stress, double.Parse(argList[2], CultureInfo.InvariantCulture), argList[1].Split(',').Select(Parse).ToArray()) } },
+    // Stability variants: corecycle / lightload / spike <seconds> (spike is CPU-only here; the app adds the GPU).
+    "corecycle" or "lightload" or "spike" => new TestPlan
+    {
+        Name = argList[0], Settings = settings,
+        Steps = { new TestStep(argList[0], StepKind.Stress, double.Parse(argList[1], CultureInfo.InvariantCulture), Component.Cpu)
+        {
+            Variant = argList[0] switch { "corecycle" => StepVariants.CoreCycle, "lightload" => StepVariants.LightLoad, _ => StepVariants.PsuSpike },
+        } },
+    },
     _ => throw new ArgumentException("unknown command"),
 };
 

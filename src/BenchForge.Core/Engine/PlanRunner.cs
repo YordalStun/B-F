@@ -184,7 +184,7 @@ public sealed class PlanRunner
                 _phases.Clear();
                 _metrics.Clear();
                 current = step;
-                var sr = new StepResult { Index = i, Name = step.Name, Kind = step.Kind, Components = step.Components.ToList(), PlannedSeconds = step.DurationSeconds, Start = stepStart, Status = "Running" };
+                var sr = new StepResult { Index = i, Name = step.Name, Kind = step.Kind, Components = step.Components.ToList(), Variant = step.Variant, PlannedSeconds = step.DurationSeconds, Start = stepStart, Status = "Running" };
                 result.Steps.Add(sr);
                 AddLog($"Step {i + 1}/{steps.Count}: {step.Name} started", Severity.Info, journal);
 

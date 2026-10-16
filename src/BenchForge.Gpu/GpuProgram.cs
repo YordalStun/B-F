@@ -14,6 +14,8 @@ namespace BenchForge.Gpu;
 public static class GpuProgram
 {
     private static volatile bool _stopRequested;
+    /// <summary>PSU spike test: the app pauses and resumes rendering in step with the CPU load.</summary>
+    private static volatile bool _paused;
 
     public static unsafe int Run(string[] args)
     {
@@ -28,7 +30,7 @@ public static class GpuProgram
 
         var stdinThread = new Thread(() =>
         {
-            try { string? line; while ((line = Console.In.ReadLine()) != null) if (line.Trim() == "stop") { _stopRequested = true; break; } }
+            try { string? line; while ((line = Console.In.ReadLine()) != null) { var cmd = line.Trim(); if (cmd == "stop") { _stopRequested = true; break; } if (cmd == "pause") _paused = true; else if (cmd == "resume") _paused = false; } }
             catch { }
         }) { IsBackground = true };
         stdinThread.Start();
@@ -143,6 +145,19 @@ public static class GpuProgram
                 }
                 Send(new GpuMessage { Type = "done" });
                 window.Close();
+                return;
+            }
+
+            if (_paused)
+            {
+                // Idle half of a load spike: no GPU work, keep the window responsive.
+                gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+                gl.ClearColor(0, 0, 0, 1);
+                gl.Clear(ClearBufferMask.ColorBufferBit);
+                DrawOverlay(gl, window, now / duration, 0, 0);
+                ReportProgress(now, "Idle (load spike pause)", 0, 1, now / duration, 0);
+                Thread.Sleep(10);
+                frameClock.Restart();
                 return;
             }
 
