@@ -59,6 +59,7 @@ TestPlan plan = argList[0] switch
     "health" => PlanPresets.DriveHealthCheck(TimeSpan.FromSeconds(double.Parse(argList[1], CultureInfo.InvariantCulture)), new[] { Path.GetTempPath() }, settings),
     "stress" => new TestPlan { Name = "stress", Settings = settings, Steps = { new TestStep("Stress", StepKind.Stress, double.Parse(argList[2], CultureInfo.InvariantCulture), argList[1].Split(',').Select(Parse).ToArray()) } },
     // Stability variants: corecycle / lightload / spike <seconds> (spike is CPU-only here; the app adds the GPU).
+    "cache" => new TestPlan { Name = "cache", Settings = settings, Steps = { new TestStep("Cache", StepKind.Benchmark, double.Parse(argList.ElementAtOrDefault(1) ?? "30", CultureInfo.InvariantCulture), Component.Memory) { Variant = StepVariants.CacheLatency } } },
     "corecycle" or "lightload" or "spike" => new TestPlan
     {
         Name = argList[0], Settings = settings,

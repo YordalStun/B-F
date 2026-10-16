@@ -15,7 +15,8 @@ public sealed unsafe class MemoryModule : ITestModule
     public Component Component => Component.Memory;
 
     public Task<ModuleResult> RunAsync(StepContext ctx) =>
-        Task.FromResult(ctx.Kind == StepKind.Benchmark ? Benchmark(ctx) : Stress(ctx));
+        Task.FromResult(ctx.Step.Variant == StepVariants.CacheLatency ? CacheLatency.Run(ctx)
+            : ctx.Kind == StepKind.Benchmark ? Benchmark(ctx) : Stress(ctx));
 
     // ---------------------------------------------------------------- benchmark
 

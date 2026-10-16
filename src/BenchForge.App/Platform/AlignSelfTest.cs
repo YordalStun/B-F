@@ -36,17 +36,23 @@ public static class AlignSelfTest
         Log($"===== {style.ToUpperInvariant()} disk =====");
         var vhd = Path.Combine(dir, $"bf-align-{style}.vhdx");
         char letter = FreeLetter();
-        // align=1 stops diskpart rounding the start up to 64 KB. MBR: 31 KB (31,744 bytes, like old XP-era layouts);
-        // GPT: just past the reserved (MSR) area at 20 MB + 3 KB. Neither is a multiple of 4,096.
-        string offsetKb = style == "mbr" ? "31" : "20483";
+        // diskpart always rounds partition starts to an aligned boundary, so create the disk with diskpart and the
+        // deliberately misaligned partition with PowerShell. MBR: sector 63 (32,256 bytes, the classic XP-era start);
+        // GPT: 20 MB + 3.5 KB, past the reserved area. Neither is a multiple of 4,096.
         Diskpart($"""
             create vdisk file="{vhd}" maximum=1024 type=expandable
             select vdisk file="{vhd}"
             attach vdisk
-            convert {style}
-            create partition primary offset={offsetKb} size=700 align=1
-            format fs=ntfs quick label="BF Test"
-            assign letter={letter}
+            """);
+        long offset = style == "mbr" ? 63 * 512 : 20L * 1024 * 1024 + 3584;
+        PowerShell($$"""
+            $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
+            $d = Get-Disk | Where-Object { $_.Location -eq '{{vhd}}' }
+            Write-Output ('Disk ' + $d.Number + ': logical sector ' + $d.LogicalSectorSize + ' bytes, physical ' + $d.PhysicalSectorSize)
+            Initialize-Disk -Number $d.Number -PartitionStyle {{style.ToUpperInvariant()}}
+            $p = New-Partition -DiskNumber $d.Number -Offset {{offset}} -Size 700MB -DriveLetter {{letter}}
+            Write-Output ('Partition created at offset ' + $p.Offset)
+            Format-Volume -Partition $p -FileSystem NTFS -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
             """);
         try
         {
@@ -184,6 +190,13 @@ public static class AlignSelfTest
             if (code != 0) throw new InvalidOperationException($"diskpart failed ({code})");
         }
         finally { File.Delete(file); }
+    }
+
+    private static void PowerShell(string script)
+    {
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        var code = Run("powershell.exe", $"-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand {encoded}");
+        if (code != 0) throw new InvalidOperationException($"PowerShell setup failed ({code})");
     }
 
     private static int Run(string exe, string args)

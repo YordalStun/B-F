@@ -29,6 +29,7 @@ public static class PlanPresets
         {
             new("CPU benchmark", StepKind.Benchmark, 146, Component.Cpu),
             new("RAM benchmark", StepKind.Benchmark, 43, Component.Memory),
+            new("CPU cache & core latency", StepKind.Benchmark, 45, Component.Memory) { Variant = StepVariants.CacheLatency },
             new("Storage benchmark", StepKind.Benchmark, 92, Component.Storage),
             new("GPU 3D benchmark", StepKind.Benchmark, 163, Component.Gpu),
             new("CPU stability", StepKind.Stress, 120, Component.Cpu),

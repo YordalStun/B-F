@@ -33,6 +33,9 @@ public static class StepVariants
     /// <summary>CPU + GPU: switch between idle and full load together (finds power supplies that trip on load spikes).</summary>
     public const string PsuSpike = "psu-spike";
 
+    /// <summary>Memory benchmark: cache latency/bandwidth ladder + core-to-core latency.</summary>
+    public const string CacheLatency = "cache-latency";
+
     public const string CoreCycleName = "Core cycler (single-core boost)";
     public const string LightLoadName = "Idle / light-load stability";
     public const string PsuSpikeName = "Load spike test (power supply)";

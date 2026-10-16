@@ -1219,3 +1219,20 @@ public class StabilityTestTests
         Assert.Contains(r.Recommendations, x => x.Title == "Check the power supply");
     }
 }
+
+public class CacheTests
+{
+    [Fact]
+    public void Cache_levels_are_found_from_the_latency_ladder()
+    {
+        // Typical desktop: L1 48 KB @ 1 ns, L2 1.25 MB @ 3.5 ns, L3 32 MB @ 11 ns, RAM ~80 ns.
+        double Ns(long s) => s <= 48 << 10 ? 1.0 : s <= 1280 << 10 ? 3.5 : s <= 32 << 20 ? 11 : 80;
+        var pts = Memory.CacheAnalysis.LadderSizes(1L << 30).Select(s => (s, Ns(s) * (1 + (s % 7) / 100.0))).ToList();
+        var levels = Memory.CacheAnalysis.DetectLevels(pts);
+        Assert.Equal(new[] { "L1", "L2", "L3", "RAM" }, levels.Select(l => l.Name));
+        Assert.InRange(levels[0].SizeBytes, 32 << 10, 48 << 10);
+        Assert.InRange(levels[1].SizeBytes, 900 << 10, 1280 << 10);
+        Assert.InRange(levels[2].SizeBytes, 22 << 20, 32 << 20);
+        Assert.InRange(levels[3].LatencyNs, 75, 90);
+    }
+}
