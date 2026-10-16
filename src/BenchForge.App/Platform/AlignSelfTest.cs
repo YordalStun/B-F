@@ -34,7 +34,8 @@ public static class AlignSelfTest
     private static async Task RunOne(string dir, string style)
     {
         Log($"===== {style.ToUpperInvariant()} disk =====");
-        var vhd = Path.Combine(dir, $"bf-align-{style}.vhdx");
+        // Classic .vhd (512-byte physical sectors): Windows refuses unaligned partitions on 4K-sector .vhdx disks.
+        var vhd = Path.Combine(dir, $"bf-align-{style}.vhd");
         char letter = FreeLetter();
         // diskpart always rounds partition starts to an aligned boundary, so create the disk with diskpart and the
         // deliberately misaligned partition with PowerShell. MBR: sector 63 (32,256 bytes, the classic XP-era start);
