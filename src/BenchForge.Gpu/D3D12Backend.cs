@@ -30,6 +30,7 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
     private readonly ulong[] _frameFence = new ulong[FramesInFlight];
     private readonly AutoResetEvent _fenceEvent = new(false);
     private int _frame;
+    private bool _recording; // a frame's command list is open
 
     private IWindow? _window;
     private IDXGISwapChain3* _swap;
@@ -397,6 +398,7 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
 
     private ulong Submit()
     {
+        _recording = false;
         _list->Close();
         var l = (ID3D12CommandList*)_list;
         _queue->ExecuteCommandLists(1, &l);
@@ -406,10 +408,18 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
 
     private void OneShot(Action record)
     {
+        if (_recording)
+        {
+            // Called mid-frame (a screenshot right after a scene): record into the frame's own list, run it, keep going.
+            record();
+            Split();
+            WaitIdle();
+            return;
+        }
         WaitIdle();
         var a = (ID3D12CommandAllocator*)_alloc[_frame];
         a->Reset();
-        _list->Reset(a, null);
+        D3DCommon.Check(_list->Reset(a, null), "command list reset");
         record();
         WaitFor(Submit());
     }
@@ -432,7 +442,8 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
         }
         var a = (ID3D12CommandAllocator*)_alloc[_frame];
         a->Reset();
-        _list->Reset(a, null);
+        D3DCommon.Check(_list->Reset(a, null), "command list reset");
+        _recording = true;
         BindCommon();
         _drawSlot = 0;
     }
@@ -464,7 +475,7 @@ internal sealed unsafe class D3D12Backend : IGpuBackend
         _list->Close();
         var l = (ID3D12CommandList*)_list;
         _queue->ExecuteCommandLists(1, &l);
-        _list->Reset((ID3D12CommandAllocator*)_alloc[_frame], null);
+        D3DCommon.Check(_list->Reset((ID3D12CommandAllocator*)_alloc[_frame], null), "command list reset");
         BindCommon();
     }
 

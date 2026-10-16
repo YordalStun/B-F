@@ -86,7 +86,7 @@ public static class AlignSelfTest
             """);
         PowerShell($$"""
             $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'
-            Format-Volume -DriveLetter {{letter}} -FileSystem NTFS -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
+            Format-Volume -DriveLetter {{letter}} -FileSystem NTFS -AllocationUnitSize 512 -NewFileSystemLabel 'BF Test' -Confirm:$false -Force | Out-Null
             """);
         try
         {
