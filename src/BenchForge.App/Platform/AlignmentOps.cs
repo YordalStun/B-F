@@ -128,10 +128,11 @@ public sealed class WindowsAlignOps : IAlignOps
     {
         Directory.CreateDirectory(to);
         // Keep permissions (S) and owner (O) only when both sides are NTFS; exFAT/FAT can't store them.
+        // /SJ /SL copy junctions and symlinks as links (never followed, never dropped).
         bool acl = IsNtfs(from) && IsNtfs(to);
         var src = Arg(from); var dst = Arg(to);
         var skip = string.Join(" ", FileManifest.Skip.Select(s => Arg(Path.Combine(from, s))));
-        var args = $"{src} {dst} /E /COPY:{(acl ? "DATSO" : "DAT")} /DCOPY:DAT /B /XJ /R:2 /W:1 /MT:8 /NP /NFL /NDL /XD {skip}";
+        var args = $"{src} {dst} /E /COPY:{(acl ? "DATSO" : "DAT")} /DCOPY:DAT /B /SJ /SL /R:2 /W:1 /MT:8 /NP /NFL /NDL /XD {skip}";
         log("  robocopy " + args);
         int code = await FixRunner.RunProcess("robocopy.exe", args, line => { if (!string.IsNullOrWhiteSpace(line)) log("  " + line); }, ct, Encoding.UTF8);
         // Copying from a drive root makes robocopy mark the destination folder hidden + system; undo that.

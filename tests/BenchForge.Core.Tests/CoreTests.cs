@@ -834,9 +834,11 @@ public class PartitionAlignTests
         public string Drive = "";
         public bool FailRecreate, CorruptCopy;
         public int Recreated;
+        public bool DropLinks;
         public Task<bool> CopyTree(string from, string to, Action<string> log, CancellationToken ct)
         {
-            foreach (var f in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+            CopyLinks(from, to);
+            foreach (var f in Directory.EnumerateFiles(from, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
             {
                 var dst = Path.Combine(to, Path.GetRelativePath(from, f));
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
@@ -845,6 +847,20 @@ public class PartitionAlignTests
             }
             return Task.FromResult(true);
         }
+        /// <summary>Like robocopy /SJ /SL: links are recreated as links, never followed.</summary>
+        private void CopyLinks(string from, string to)
+        {
+            if (DropLinks) return;
+            foreach (var d in Directory.EnumerateDirectories(from, "*", new EnumerationOptions { RecurseSubdirectories = true }))
+            {
+                var info = new DirectoryInfo(d);
+                if (!info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.LinkTarget is null) continue;
+                var dst = Path.Combine(to, Path.GetRelativePath(from, d));
+                Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                if (!Directory.Exists(dst)) Directory.CreateSymbolicLink(dst, info.LinkTarget);
+            }
+        }
+
         public Task<long?> Recreate(Storage.PartitionEntry p, Action<string> log)
         {
             if (FailRecreate) { Directory.Delete(Drive, true); return Task.FromResult<long?>(null); }
@@ -863,6 +879,9 @@ public class PartitionAlignTests
         File.WriteAllText(Path.Combine(drive, "notes.txt"), "hello");
         File.WriteAllBytes(Path.Combine(drive, "Photos", "2024", "big.bin"), Enumerable.Range(0, 3_000_000).Select(i => (byte)(i * 31)).ToArray());
         Directory.CreateDirectory(Path.Combine(drive, "System Volume Information"));
+        // Like a game-library junction. (Targets exist: on Linux a dangling link isn't listed as a folder, unlike Windows.)
+        Directory.CreateDirectory(Path.Combine(root, "elsewhere", "SteamLibrary"));
+        Directory.CreateSymbolicLink(Path.Combine(drive, "Library"), Path.Combine(root, "elsewhere", "SteamLibrary"));
         File.WriteAllText(Path.Combine(drive, "System Volume Information", "tracking.log"), "windows");
         Persistence.DataPaths.Override(Path.Combine(root, "data"));
         return (root, drive, Path.Combine(root, "backup"));
@@ -875,13 +894,15 @@ public class PartitionAlignTests
     {
         var (root, drive, backup) = Setup();
         var before = Storage.FileManifest.Build(drive);
-        Assert.Equal(2, before.Count); // System Volume Information is skipped
+        Assert.Equal(3, before.Count); // 2 files + the link; System Volume Information is skipped
+        Assert.Equal(Storage.FileManifest.LinkSize, before["Library"].Size);
         var ops = new FakeOps { Drive = drive };
         var log = new List<string>();
         bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
         Assert.True(ok, string.Join("\n", log));
         Assert.Equal(1, ops.Recreated);
         Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
+        Assert.True(new DirectoryInfo(Path.Combine(drive, "Library")).LinkTarget is not null);
         Assert.False(Directory.Exists(backup));
         Assert.Null(Storage.AlignJob.Load());
         Directory.Delete(root, true);
@@ -936,6 +957,40 @@ public class PartitionAlignTests
         Assert.Empty(Storage.FileManifest.Compare(before, Storage.FileManifest.Build(drive)));
         Assert.True(Directory.Exists(backup)); // user chose to keep it
         Assert.Null(Storage.AlignJob.Load());
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Dropped_links_are_caught_before_anything_is_deleted()
+    {
+        var (root, drive, backup) = Setup();
+        var ops = new FakeOps { Drive = drive, DropLinks = true };
+        var log = new List<string>();
+        bool ok = await new Storage.PartitionAligner(ops, log.Add, (_, _) => { }).RunAsync(DataPart(), drive, backup, Yes, Yes, CancellationToken.None);
+        Assert.False(ok);
+        Assert.Equal(0, ops.Recreated);
+        Assert.Contains(log, l => l.Contains("missing link: Library"));
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public void Manifest_does_not_follow_links_and_spots_retargeted_ones()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "bf-links-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(root, "target");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Combine(target, "inside.txt"), "x");
+        var a = Path.Combine(root, "a"); var b = Path.Combine(root, "b");
+        Directory.CreateDirectory(a); Directory.CreateDirectory(b);
+        Directory.CreateSymbolicLink(Path.Combine(a, "link"), target);
+        Directory.CreateDirectory(Path.Combine(root, "other"));
+        Directory.CreateSymbolicLink(Path.Combine(b, "link"), Path.Combine(root, "other"));
+        var ma = Storage.FileManifest.Build(a);
+        Assert.Single(ma); // the link only — inside.txt is not reached through it
+        Assert.Contains("link points somewhere else: link", Storage.FileManifest.Compare(ma, Storage.FileManifest.Build(b)));
+        Directory.Delete(Path.Combine(b, "link"));
+        File.WriteAllText(Path.Combine(b, "link"), "a plain file where the link was");
+        Assert.Contains("link became a normal file/folder: link", Storage.FileManifest.Compare(ma, Storage.FileManifest.Build(b)));
         Directory.Delete(root, true);
     }
 }

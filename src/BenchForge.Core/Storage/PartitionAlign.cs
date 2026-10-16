@@ -122,7 +122,10 @@ public static class PartitionAlign
     }
 }
 
-/// <summary>Size + fingerprint of every file in a folder tree, to prove a copy is identical.</summary>
+/// <summary>
+/// Size + fingerprint of every file in a folder tree, to prove a copy is identical. Links (symlinks, junctions) are recorded
+/// by their target text with size -1 and never followed, so a copy that dropped or changed a link is caught too.
+/// </summary>
 public static class FileManifest
 {
     /// <summary>Folders Windows recreates by itself; never copied or compared.</summary>
@@ -133,9 +136,14 @@ public static class FileManifest
         var map = new Dictionary<string, (long, ulong)>(StringComparer.OrdinalIgnoreCase);
         var buf = new byte[1 << 20];
         long total = 0;
-        foreach (var file in Walk(root))
+        foreach (var (file, link) in Walk(root))
         {
             ct.ThrowIfCancellationRequested();
+            if (link is not null)
+            {
+                map[Path.GetRelativePath(root, file)] = (LinkSize, XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(link)));
+                continue;
+            }
             var h = new XxHash3();
             long len = 0;
             using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan))
@@ -148,19 +156,27 @@ public static class FileManifest
         return map;
     }
 
-    private static IEnumerable<string> Walk(string root)
+    /// <summary>Size recorded for a link entry (its hash is of the target text).</summary>
+    public const long LinkSize = -1;
+
+    /// <summary>Every file, plus every link with its target (links are listed, never followed).</summary>
+    private static IEnumerable<(string Path, string? LinkTarget)> Walk(string root)
     {
         var stack = new Stack<string>();
         stack.Push(root);
         while (stack.Count > 0)
         {
             var dir = stack.Pop();
-            foreach (var f in Directory.EnumerateFiles(dir)) yield return f;
+            foreach (var f in Directory.EnumerateFiles(dir))
+            {
+                var fi = new FileInfo(f);
+                yield return (f, fi.Attributes.HasFlag(FileAttributes.ReparsePoint) ? fi.LinkTarget ?? "" : null);
+            }
             foreach (var d in Directory.EnumerateDirectories(dir))
             {
                 var info = new DirectoryInfo(d);
                 if (dir == root && Skip.Contains(info.Name, StringComparer.OrdinalIgnoreCase)) continue;
-                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue; // junctions/links are not followed
+                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) { yield return (d, info.LinkTarget ?? ""); continue; }
                 stack.Push(d);
             }
         }
@@ -172,7 +188,9 @@ public static class FileManifest
         var diff = new List<string>();
         foreach (var (path, e) in expected)
         {
-            if (!actual.TryGetValue(path, out var a)) diff.Add($"missing: {path}");
+            if (!actual.TryGetValue(path, out var a)) diff.Add(e.Size == LinkSize ? $"missing link: {path}" : $"missing: {path}");
+            else if ((a.Size == LinkSize) != (e.Size == LinkSize)) diff.Add(e.Size == LinkSize ? $"link became a normal file/folder: {path}" : $"file became a link: {path}");
+            else if (e.Size == LinkSize && a.Hash != e.Hash) diff.Add($"link points somewhere else: {path}");
             else if (a.Size != e.Size) diff.Add($"different size: {path}");
             else if (a.Hash != e.Hash) diff.Add($"different content: {path}");
         }

@@ -102,7 +102,9 @@ public partial class AlignWindow : Window
         var minutes = Math.Max(2, used * 6 / 200e6 / 60);
         AutoTitle.Text = $"BenchForge can fix {p.Name} itself";
         AutoText.Text = $"It copies the {used / 1e9:0.0} GB of files on {p.Name} to another drive, checks every file, deletes {p.Name} and creates it again aligned (same letter, name and file system), copies the files back and checks every file again. "
-                      + $"Takes about {minutes:0} minutes. Nothing is deleted until the copy has been checked, and you are asked once more before that.";
+                      + $"Takes about {minutes:0} minutes. Nothing is deleted until the copy has been checked, and you are asked once more before that.\n\n"
+                      + "Unlike MiniTool or AOMEI, which shift the partition in place, BenchForge works with a checked copy of your files — a power cut can't lose data, but it needs space on another drive.\n\n"
+                      + AfterEffects;
         var targets = PartitionAlign.BackupTargets(p, PartitionReader.Volumes(_parts));
         BackupCombo.ItemsSource = targets;
         BackupCombo.SelectedIndex = targets.Count > 0 ? 0 : -1;
@@ -111,6 +113,8 @@ public partial class AlignWindow : Window
         BackupWarning.Text = targets.Count == 0 ? $"No other drive has {(used + PartitionAlign.BackupMargin) / 1e9:0} GB free for the temporary copy. Plug in a USB drive with enough space (not FAT32) and press 'Check again'." : "";
         BackupWarning.Visibility = targets.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
+
+    private const string AfterEffects = "Your files, folders, links, permissions, drive letter and name stay the same. Restore points (shadow copies) for this drive and its serial number are reset, and hard-linked files become separate copies.";
 
     private void BackupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -144,6 +148,7 @@ public partial class AlignWindow : Window
                 + $"2. Delete {p.Name} and create it again aligned (you'll be asked once more first)\n"
                 + $"3. Copy the files back and check every one\n\n"
                 + $"Close all programs that use {p.Name}, keep the PC plugged in and don't use {p.Name} until it's done.\n"
+                + AfterEffects + "\n\n"
                 + "Having your own backup of important files is still wise.";
         if (MessageBox.Show(this, msg, "Partition alignment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
