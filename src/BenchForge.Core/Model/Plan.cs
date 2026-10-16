@@ -72,6 +72,8 @@ public static class PsuSpikeSchedule
 
 public sealed class TestSettings
 {
+    /// <summary>Ping the router and internet in the background during tests (finds network drivers that fail under load).</summary>
+    public bool NetworkMonitor { get; set; } = true;
     /// <summary>Auto = laptop rules when a laptop is detected.</summary>
     public LaptopMode LaptopMode { get; set; } = LaptopMode.Auto;
     /// <summary>Resolved at start: judge this run with laptop rules (running at the thermal limit is normal).</summary>

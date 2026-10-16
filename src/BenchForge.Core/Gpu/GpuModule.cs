@@ -179,7 +179,7 @@ public sealed class GpuModule : ITestModule
                 result.SubScores.Add(new SubScore
                 {
                     Name = sc.Scene, Group = ctx.Kind == StepKind.Benchmark ? "3D scenes" : "Stress",
-                    Value = Math.Round(sc.AvgFps, 1), Unit = "FPS", Score = Math.Round(score),
+                    Value = Math.Round(sc.AvgFps, 1), Unit = "FPS", Score = Math.Round(score), Low1Fps = Math.Round(sc.Low1Fps, 1),
                     Detail = $"1% low {sc.Low1Fps:0.0} FPS · 99th percentile frame {sc.P99Ms:0.0} ms · {sc.Frames} frames",
                 });
             }

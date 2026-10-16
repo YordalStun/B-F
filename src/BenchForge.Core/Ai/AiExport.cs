@@ -163,6 +163,12 @@ public static class AiExport
         }
         foreach (var l in hw.PcieLinks) sb.AppendLine($"- **PCIe link — {l.Device} ({l.Kind}):** {l}{(l.Degraded ? " ← running below maximum" : "")}");
         if (hw.TrimEnabled is bool trim) sb.AppendLine($"- **TRIM:** {(trim ? "on" : "OFF")}");
+        foreach (var d in hw.Displays)
+            sb.AppendLine($"- **{d.Name}:** {d.Width}×{d.Height} @ {d.CurrentHz} Hz (max {d.MaxHzAtCurrentResolution} Hz at this resolution, {d.MaxHz} Hz at any; max resolution {d.MaxWidth}×{d.MaxHeight}){(d.Primary ? " — primary" : "")}");
+        foreach (var n in hw.NetworkAdapters)
+            sb.AppendLine($"- **Network {n.Kind} — {n.Name}:** {(n.Connected ? "connected" : "not connected")}{(n.LinkMbps is double m ? $", link {m:0} Mbit/s" : "")}{(n.WifiSignalPercent is int s ? $", signal {s}%" : "")}{(n.WifiBand != null ? $", {n.WifiBand}" : "")} ({n.Description})");
+        foreach (var u in hw.UsbDevices)
+            sb.AppendLine($"- **USB — {u.Name} ({u.VidPid}):** {u.Speed}{(u.Degraded ? " ← USB 3 device running slower than it can" : "")}");
         sb.AppendLine($"- **Motherboard:** {hw.Motherboard}, BIOS {hw.BiosVersion} ({hw.BiosDate:yyyy-MM-dd})");
         sb.AppendLine($"- **Windows:** {hw.OsName} {hw.OsVersion}, last boot {hw.LastBoot:yyyy-MM-dd HH:mm}, power plan \"{hw.PowerPlan}\"");
         if (hw.IsLaptop || hw.HasBattery)
@@ -246,6 +252,12 @@ public static class AiExport
             sb.AppendLine("### BenchForge findings").AppendLine();
             foreach (var f in r.Findings) sb.AppendLine($"- [{f.Severity}] {f.Title}{(f.Detail.Length > 0 ? " — " + f.Detail : "")}");
             sb.AppendLine();
+        }
+        if (r.Network.Count > 0)
+        {
+            sb.AppendLine().AppendLine("### Network during the run (background pings every 2 s)");
+            foreach (var t in r.Network)
+                sb.AppendLine($"- {t.Name} ({t.Address}): {t.Sent} sent, {t.LossPercent:0.#}% lost, avg {t.AvgMs:0} ms, worst {t.MaxMs:0} ms, {t.Dropouts} dropouts");
         }
         if (r.Recommendations.Count > 0)
         {

@@ -12,6 +12,8 @@ public sealed class SubScore
     public double Score { get; set; }
     public bool HigherIsBetter { get; set; } = true;
     public string? Detail { get; set; }
+    /// <summary>3D scenes: average FPS of the slowest 1 % of frames (stutter indicator).</summary>
+    public double? Low1Fps { get; set; }
 }
 
 public sealed class TestError
@@ -129,6 +131,8 @@ public sealed class RunResult
     public string? AbortReason { get; set; }
 
     public CrashInfo? Crash { get; set; }
+    /// <summary>Background pings to the router / internet during the run.</summary>
+    public List<NetworkTargetStats> Network { get; set; } = new();
     public List<EventEntry> RelatedEvents { get; set; } = new();
     public List<Finding> Findings { get; set; } = new();
     public List<Recommendation> Recommendations { get; set; } = new();

@@ -32,6 +32,9 @@ public sealed class HardwareInventory
     /// <summary>TRIM enabled for NTFS (fsutil DisableDeleteNotify = 0).</summary>
     public bool? TrimEnabled { get; set; }
     public List<PcieLink> PcieLinks { get; set; } = new();
+    public List<DisplayInfo> Displays { get; set; } = new();
+    public List<NetAdapterInfo> NetworkAdapters { get; set; } = new();
+    public List<UsbDeviceInfo> UsbDevices { get; set; } = new();
     public List<string> Notes { get; set; } = new();
 }
 
@@ -120,4 +123,59 @@ public sealed record PcieLink(string Device, string Kind, int CurrentGen, int Cu
 {
     public bool Degraded => CurrentGen > 0 && MaxGen > 0 && (CurrentGen < MaxGen || CurrentWidth < MaxWidth);
     public override string ToString() => $"PCIe {CurrentGen}.0 ×{CurrentWidth} (supports {MaxGen}.0 ×{MaxWidth})";
+}
+
+public sealed class DisplayInfo
+{
+    public string Name { get; set; } = "";
+    public string Adapter { get; set; } = "";
+    public bool Primary { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int CurrentHz { get; set; }
+    /// <summary>Highest refresh rate offered at the current resolution.</summary>
+    public int MaxHzAtCurrentResolution { get; set; }
+    /// <summary>Highest refresh rate offered at any resolution.</summary>
+    public int MaxHz { get; set; }
+    public int MaxWidth { get; set; }
+    public int MaxHeight { get; set; }
+}
+
+public sealed class NetAdapterInfo
+{
+    public string Name { get; set; } = "";
+    public string Description { get; set; } = "";
+    /// <summary>"Wired" or "Wi-Fi".</summary>
+    public string Kind { get; set; } = "";
+    public bool Connected { get; set; }
+    public double? LinkMbps { get; set; }
+    public int? WifiSignalPercent { get; set; }
+    public string? WifiBand { get; set; }
+    public string? WifiStandard { get; set; }
+}
+
+public sealed class UsbDeviceInfo
+{
+    public string Name { get; set; } = "";
+    public string VidPid { get; set; } = "";
+    /// <summary>Speed it is running at: "USB 1 Low", "USB 1 Full", "USB 2 High", "USB 3 SuperSpeed", "USB 3 SuperSpeed+".</summary>
+    public string Speed { get; set; } = "";
+    public bool SuperSpeedCapable { get; set; }
+    public bool RunningAtSuperSpeed { get; set; }
+    public bool Degraded => SuperSpeedCapable && !RunningAtSuperSpeed;
+}
+
+public sealed class NetworkTargetStats
+{
+    public string Name { get; set; } = "";
+    public string Address { get; set; } = "";
+    public int Sent { get; set; }
+    public int Received { get; set; }
+    public double SumMs { get; set; }
+    public double MaxMs { get; set; }
+    public int Dropouts { get; set; }
+    /// <summary>Pinging was not possible at all (blocked) — no conclusions.</summary>
+    public bool Unavailable { get; set; }
+    public double LossPercent => Sent == 0 ? 0 : 100.0 * (Sent - Received) / Sent;
+    public double AvgMs => Received == 0 ? 0 : SumMs / Received;
 }

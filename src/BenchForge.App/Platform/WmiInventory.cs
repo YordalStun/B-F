@@ -130,6 +130,7 @@ public static class WmiInventory
             inv.PowerPlan = a >= 0 && b > a ? output[(a + 1)..b] : output.Trim();
         });
         Try(inv, "Drive health", () => DriveHealthReader.Fill(inv));
+        Try(inv, "Monitors / network / USB", () => PeripheralReader.Fill(inv));
         Try(inv, "Laptop / battery", () =>
         {
             int[] portable = { 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 };

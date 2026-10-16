@@ -29,6 +29,25 @@ public static class RecommendationEngine
                 "If you don't: load BIOS defaults and update the BIOS — boost and voltage fixes often ship as BIOS updates",
                 "Repeat the core cycler until every core passes a few rounds",
                 "If one core fails even at stock settings, the CPU may be faulty — consider a warranty claim");
+        if (Has(x => x.Title.Contains(" Hz but supports ")))
+            Add(Severity.Warning, null, "Set your monitor to its full refresh rate", "A high-refresh monitor is running at a lower rate than it supports.",
+                "Windows Settings › System › Display › Advanced display › Choose a refresh rate — pick the highest",
+                "If the higher rate isn't offered: use the DisplayPort cable that came with the monitor, or an HDMI 2.1 / 'Ultra High Speed' cable",
+                "Plug the monitor into the graphics card, not the motherboard",
+                "In NVIDIA / AMD control panel check the resolution's refresh rate too");
+        if (Has(x => x.Title.StartsWith("Network cable link is only")))
+            Add(Severity.Warning, null, "Replace the network cable", "The wired connection negotiated a slow 100 Mbit/s link.",
+                "Try a different (Cat5e or better) network cable", "Try another port on the router/switch", "Update the network adapter driver from the motherboard maker's website");
+        if (Has(x => x.Title.StartsWith("Network dropped out") || x.Title.Contains("network pings lost")))
+            Add(Severity.Warning, null, "Stabilise the network adapter", "The network stopped answering while the PC was under load.",
+                "Update the network adapter driver (Intel / Realtek / Killer) from the motherboard or laptop maker's site",
+                "Device Manager › network adapter › Power Management: untick 'Allow the computer to turn off this device to save power'",
+                "On Wi-Fi: try 5 GHz, move closer to the router, or test with a cable to see if it's the wireless link");
+        if (Has(x => x.Title.Contains("is a USB 3 device running at")))
+            Add(Severity.Warning, null, "Use a USB 3 port for the slow USB device", "A USB 3 device is connected at USB 2 speed.",
+                "Move it to a USB 3 port (blue, or marked SS / 5Gbps / 10Gbps) on the back of the PC",
+                "Use the cable that came with it (USB 3 cables have extra wires)",
+                "Avoid unpowered hubs; update the chipset / USB drivers");
         if (Has(x => x.Title == "The PC shut down during the power-supply load-spike test"))
             Add(Severity.Critical, null, "Check the power supply", "The PC switched off when CPU and GPU load jumped together — typical of a weak or failing power supply.",
                 "Make sure the GPU uses separate PCIe power cables from the PSU (not one daisy-chained cable)",

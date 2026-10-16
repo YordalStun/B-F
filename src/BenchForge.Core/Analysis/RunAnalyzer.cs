@@ -1,4 +1,5 @@
 using BenchForge.Core.Model;
+using BenchForge.Core.Platform;
 
 namespace BenchForge.Core.Analysis;
 
@@ -17,6 +18,9 @@ public static class RunAnalyzer
         Performance(r, f);
         Power(r, f);
         StabilityTests(r, f);
+        PeripheralChecks(r.Hardware, f);
+        NetworkDuringRun(r, f);
+        FramePacing(r, f);
         r.Findings = f.OrderByDescending(x => x.Severity).ToList();
         r.Recommendations = RecommendationEngine.Build(r);
     }
@@ -369,6 +373,78 @@ public static class RunAnalyzer
             });
         if (hw.TrimEnabled == false && hw.Disks.Any(d => d.MediaType == "SSD"))
             f.Add(new Finding { Severity = Severity.Warning, Component = Component.Storage, Title = "TRIM is turned off", Detail = "Without TRIM, SSDs slow down over time and wear faster." });
+    }
+
+    /// <summary>Monitors, network adapters and USB ports (inventory only, no test needed).</summary>
+    private static void PeripheralChecks(HardwareInventory? hw, List<Finding> f)
+    {
+        if (hw == null) return;
+        foreach (var d in hw.Displays)
+        {
+            if (d.MaxHzAtCurrentResolution > d.CurrentHz + 5 && d.CurrentHz > 0)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Title = $"{d.Name} runs at {d.CurrentHz} Hz but supports {d.MaxHzAtCurrentResolution} Hz",
+                    Detail = $"At {d.Width}×{d.Height}. Games and the desktop will look less smooth than they should. Set it in Windows Settings › System › Display › Advanced display › Choose a refresh rate.",
+                });
+            else if (d.MaxHz > d.CurrentHz + 5 && d.MaxHz >= 100 && d.CurrentHz > 0)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Info, Title = $"{d.Name} can do {d.MaxHz} Hz at a lower resolution",
+                    Detail = $"It runs at {d.Width}×{d.Height} @ {d.CurrentHz} Hz. If you expected a higher refresh at full resolution, the cable or port may be limiting it (use DisplayPort or an HDMI 2.1 cable).",
+                });
+            if (d.MaxWidth > 0 && (d.Width < d.MaxWidth || d.Height < d.MaxHeight) && d.Width > 0)
+                f.Add(new Finding { Severity = Severity.Info, Title = $"{d.Name} is not at its full resolution", Detail = $"Running {d.Width}×{d.Height}; it supports {d.MaxWidth}×{d.MaxHeight}. Text and images will be less sharp." });
+        }
+        foreach (var n in hw.NetworkAdapters.Where(n => n.Connected))
+        {
+            if (n.Kind == "Wired" && n.LinkMbps is double mbps && mbps > 0 && mbps <= 100)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Title = $"Network cable link is only {mbps:0} Mbit/s ({n.Name})",
+                    Detail = "Almost every wired port today is 1,000 Mbit/s or faster. 100 Mbit/s usually means a damaged cable (one wire pair broken), a loose plug, or an old switch/router port.",
+                });
+            if (n.Kind == "Wi-Fi" && n.WifiSignalPercent is int sig && sig < 50)
+                f.Add(new Finding { Severity = Severity.Info, Title = $"Weak Wi-Fi signal ({sig}%)", Detail = $"{n.Name}{(n.WifiBand != null ? $" on {n.WifiBand}" : "")}. Expect slower, less stable internet; move closer to the router or use 5 GHz / a cable." });
+        }
+        foreach (var u in hw.UsbDevices.Where(u => u.Degraded))
+            f.Add(new Finding
+            {
+                Severity = Severity.Warning, Title = $"{u.Name} is a USB 3 device running at {u.Speed} speed",
+                Detail = "It could be up to 10× faster. Plug it into a USB 3 port (usually blue, or marked SS), use a USB 3 cable, avoid unpowered hubs and front-panel ports with old internal cables, and update the chipset / USB drivers.",
+            });
+    }
+
+    private static void NetworkDuringRun(RunResult r, List<Finding> f)
+    {
+        foreach (var t in r.Network.Where(t => t.Sent >= 20))
+        {
+            if (t.Dropouts > 0)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Title = $"Network dropped out {t.Dropouts}× during the test ({t.Name.ToLowerInvariant()})",
+                    Detail = $"No reply for {NetworkMonitor.DropoutPings * 2}+ seconds. Lost {t.LossPercent:0.#}% of pings overall. Network adapters that drop under heavy load usually need a driver update or 'Allow the computer to turn off this device to save power' turned off.",
+                });
+            else if (t.LossPercent >= 2)
+                f.Add(new Finding { Severity = Severity.Warning, Title = $"{t.LossPercent:0.#}% of network pings lost during the test ({t.Name.ToLowerInvariant()})", Detail = $"Average {t.AvgMs:0} ms, worst {t.MaxMs:0} ms." });
+            else if (t.Name == "Router" && t.MaxMs > 200)
+                f.Add(new Finding { Severity = Severity.Info, Title = $"Ping to the router spiked to {t.MaxMs:0} ms during the test", Detail = $"Average {t.AvgMs:0} ms. Spikes under load point to Wi-Fi interference or the network driver being starved of CPU time." });
+        }
+    }
+
+    /// <summary>Stutter: 1% lows far below the average frame rate.</summary>
+    private static void FramePacing(RunResult r, List<Finding> f)
+    {
+        foreach (var m in r.AllModules.Where(m => m.Component == Component.Gpu && m.Kind == StepKind.Benchmark))
+        {
+            var bad = m.SubScores.Where(s => s.Detail != null && s.Value > 30 && s.Low1Fps is double low && low < s.Value * 0.4).ToList();
+            if (bad.Count > 0)
+                f.Add(new Finding
+                {
+                    Severity = Severity.Warning, Component = Component.Gpu, Title = "Stutter in the 3D test",
+                    Detail = string.Join("; ", bad.Select(s => $"{s.Name}: {s.Value:0} FPS average but 1% lows of {s.Low1Fps:0} FPS")) + ". Usually background programs, a CPU or drive holding the game back, power-saving, or driver issues.",
+                });
+        }
     }
 
     /// <summary>Core cycler, light-load and load-spike results.</summary>

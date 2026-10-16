@@ -1236,3 +1236,47 @@ public class CacheTests
         Assert.InRange(levels[3].LatencyNs, 75, 90);
     }
 }
+
+public class PeripheralTests
+{
+    [Fact]
+    public void Slow_monitor_cable_link_and_usb_are_reported()
+    {
+        var hw = new HardwareInventory();
+        hw.Displays.Add(new DisplayInfo { Name = "Monitor 1", Width = 2560, Height = 1440, CurrentHz = 60, MaxHzAtCurrentResolution = 165, MaxHz = 165, MaxWidth = 2560, MaxHeight = 1440 });
+        hw.NetworkAdapters.Add(new NetAdapterInfo { Name = "Ethernet", Kind = "Wired", Connected = true, LinkMbps = 100 });
+        hw.UsbDevices.Add(new UsbDeviceInfo { Name = "SanDisk Extreme", Speed = "USB 2 High", SuperSpeedCapable = true, RunningAtSuperSpeed = false });
+        hw.UsbDevices.Add(new UsbDeviceInfo { Name = "Mouse", Speed = "USB 1 Full" });
+        var recs = RecommendationEngine.SystemChecks(hw);
+        Assert.Contains(recs, x => x.Title == "Set your monitor to its full refresh rate");
+        Assert.Contains(recs, x => x.Title == "Replace the network cable");
+        var usb = Assert.Single(recs, x => x.Title == "Use a USB 3 port for the slow USB device");
+        var r = new RunResult { Status = RunStatus.Running, Hardware = hw };
+        RunAnalyzer.Analyze(r);
+        Assert.DoesNotContain(r.Findings, f => f.Title.Contains("Mouse"));
+    }
+
+    [Fact]
+    public void Network_dropouts_during_a_run_are_reported()
+    {
+        var r = new RunResult { Status = RunStatus.Completed };
+        r.Network.Add(new NetworkTargetStats { Name = "Router", Sent = 300, Received = 280, SumMs = 280 * 3, MaxMs = 40, Dropouts = 2 });
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title.StartsWith("Network dropped out 2×"));
+        Assert.Contains(r.Recommendations, x => x.Title == "Stabilise the network adapter");
+    }
+
+    [Fact]
+    public void Stutter_is_found_from_one_percent_lows()
+    {
+        var r = new RunResult { Status = RunStatus.Completed };
+        var gpu = new ModuleResult { Component = Component.Gpu, Kind = StepKind.Benchmark };
+        gpu.SubScores.Add(new SubScore { Name = "Geometry", Value = 140, Low1Fps = 30, Detail = "1% low 30 FPS" });
+        gpu.SubScores.Add(new SubScore { Name = "Shading", Value = 90, Low1Fps = 80, Detail = "1% low 80 FPS" });
+        r.Steps.Add(new StepResult { Name = "GPU", Modules = { gpu } });
+        RunAnalyzer.Analyze(r);
+        var f = Assert.Single(r.Findings, x => x.Title == "Stutter in the 3D test");
+        Assert.Contains("Geometry", f.Detail);
+        Assert.DoesNotContain("Shading", f.Detail);
+    }
+}

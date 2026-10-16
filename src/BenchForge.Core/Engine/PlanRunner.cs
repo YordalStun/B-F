@@ -3,6 +3,7 @@ using System.Diagnostics;
 using BenchForge.Core.Analysis;
 using BenchForge.Core.Model;
 using BenchForge.Core.Persistence;
+using BenchForge.Core.Platform;
 
 namespace BenchForge.Core.Engine;
 
@@ -83,6 +84,14 @@ public sealed class PlanRunner
         double? lastAc = null;
         // Laptops are built to sit at their thermal limit: require the limit to be held longer before stopping.
         int hold = _plan.Settings.LaptopRules ? 10 : 3;
+
+        using var net = _plan.Settings.NetworkMonitor ? new NetworkMonitor() : null;
+        if (net != null)
+        {
+            net.Sample += (name, ms) => { if (ms >= 0) _metrics[$"net.{name.ToLowerInvariant()}"] = ($"Ping to {name.ToLowerInvariant()}", ms, "ms"); };
+            net.DropoutStarted += name => AddLog($"Network dropout: no reply from the {name.ToLowerInvariant()} for {NetworkMonitor.DropoutPings * 2} s", Severity.Warning, journal);
+            net.Start();
+        }
 
         // Sensor sampling + progress + heartbeat loop (1 Hz).
         var samplerCts = new CancellationTokenSource();
@@ -227,6 +236,7 @@ public sealed class PlanRunner
             current = null;
             samplerCts.Cancel();
             try { await sampler; } catch { }
+            if (net != null) result.Network = net.Targets.Where(t => !t.Unavailable && t.Sent > 0).ToList();
             IsRunning = false;
         }
 
