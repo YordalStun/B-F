@@ -56,9 +56,6 @@ public sealed partial class RunSetupViewModel : PageViewModel
             new() { Key = "custom", Title = "Custom plan", Glyph = "", Description = "Build your own list of steps, and loop it." },
         };
         foreach (var p in Presets) p.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(PresetOption.IsSelected) && p.IsSelected) { Selected = p; Rebuild(); } };
-        Presets[0].IsSelected = true;
-        Selected = Presets[0];
-
         var s = Main.S.Settings;
         _hours = s.BurnHours; _minutes = s.BurnMinutes;
         _burnCpu = s.BurnComponents.Contains(Component.Cpu); _burnGpu = s.BurnComponents.Contains(Component.Gpu);
@@ -78,6 +75,9 @@ public sealed partial class RunSetupViewModel : PageViewModel
         }
         _storageTarget = Drives.Contains(t.StorageTarget) ? t.StorageTarget : Drives.FirstOrDefault(d => d == StorageModule.DefaultTarget()) ?? Drives.FirstOrDefault() ?? "";
         foreach (var dc in DriveChoices) dc.IsChecked = dc.Drive == _storageTarget;
+        // Select the first preset only now: selecting it builds the plan preview, which needs every setting above.
+        Presets[0].IsSelected = true;
+        Selected = Presets[0];
         PropertyChanged += OnAnyChanged;
         Rebuild();
     }
@@ -185,7 +185,7 @@ public sealed partial class RunSetupViewModel : PageViewModel
     private TestSettings BuildSettings() => new()
     {
         CpuStressMode = CpuStressMode, MemoryPercent = MemoryPercent, StorageTarget = StorageTarget, StorageFileMB = StorageFileMB,
-        GpuFullscreen = GpuFullscreen, GpuApi = GpuApi.Key, CpuTempLimit = CpuTempLimit, GpuTempLimit = GpuTempLimit, StopOnError = StopOnError, ReopenAfterCrash = ReopenAfterCrash,
+        GpuFullscreen = GpuFullscreen, GpuApi = GpuApi?.Key ?? Core.Gpu.GpuApis.OpenGL, CpuTempLimit = CpuTempLimit, GpuTempLimit = GpuTempLimit, StopOnError = StopOnError, ReopenAfterCrash = ReopenAfterCrash,
         LaptopMode = LaptopMode, LaptopRules = LaptopRules,
     };
 
@@ -252,6 +252,13 @@ public sealed partial class RunSetupViewModel : PageViewModel
             var total = TimeSpan.FromSeconds(plan.TotalSeconds);
             TotalText = $"Takes {TimeFormat.Short(total)}";
             FinishText = $"Finishes around {DateTime.Now + total:HH:mm}{((DateTime.Now + total).Date != DateTime.Today ? $" on {(DateTime.Now + total):ddd d MMM}" : "")}";
+        }
+        catch (Exception ex)
+        {
+            // A broken preview must never stop BenchForge from opening.
+            BenchForge.Core.Persistence.DataPaths.AppLogWrite("Plan preview failed: " + ex);
+            Preview.Clear(); TotalText = ""; FinishText = "";
+            PlanWarning = "Could not build this plan: " + ex.Message;
         }
         finally { _rebuilding = false; }
     }
