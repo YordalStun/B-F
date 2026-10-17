@@ -130,6 +130,41 @@ public static partial class DriveHealthReader
 
     private static void Alignment(HardwareInventory inv)
     {
+        // Same source as the alignment window (MSFT_Partition), so the dashboard and the window always agree.
+        // Win32_DiskPartition is only the fallback: it can disagree with what Windows' storage stack reports.
+        try { AlignmentFromStorage(inv); return; }
+        catch { foreach (var d in inv.Disks) { d.Misaligned = null; d.MisalignedPartitions.Clear(); } }
+        AlignmentFromWin32(inv);
+    }
+
+    private static void AlignmentFromStorage(HardwareInventory inv)
+    {
+        using var s = new ManagementObjectSearcher(@"root\Microsoft\Windows\Storage",
+            "SELECT DiskNumber, PartitionNumber, DriveLetter, Offset, MbrType FROM MSFT_Partition");
+        int seen = 0;
+        foreach (ManagementObject o in s.Get())
+        {
+            seen++;
+            var d = inv.Disks.FirstOrDefault(x => x.DiskNumber == Convert.ToInt32(o["DiskNumber"]));
+            if (d == null) continue;
+            // An MBR extended container only holds other partitions; its own start doesn't matter.
+            if (o["MbrType"] != null && Convert.ToInt32(o["MbrType"]) is 5 or 15) continue;
+            long off = Convert.ToInt64(o["Offset"]);
+            if (off % 4096 != 0)
+            {
+                d.Misaligned = true;
+                char letter = o["DriveLetter"] is char c ? c : Convert.ToChar(Convert.ToUInt16(o["DriveLetter"] ?? 0));
+                int num = Convert.ToInt32(o["PartitionNumber"]);
+                var label = char.IsLetter(letter) ? $"{char.ToUpperInvariant(letter)}: (partition {num})" : $"Partition {num}";
+                d.MisalignedPartitions.Add($"{label} starts at {off:N0} bytes — not a multiple of 4,096");
+            }
+            else d.Misaligned ??= false;
+        }
+        if (seen == 0) throw new InvalidOperationException("no partitions");
+    }
+
+    private static void AlignmentFromWin32(HardwareInventory inv)
+    {
         // Partition DeviceID ("Disk #0, Partition #1") → drive letter ("C:").
         var letters = new Dictionary<string, string>();
         try

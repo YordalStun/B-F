@@ -123,15 +123,30 @@ public static class FixRunner
 
     internal static async Task<int> RunProcess(string file, string args, Action<string> output, CancellationToken ct, Encoding enc)
     {
-        var psi = new ProcessStartInfo(file, args)
+        // Windows tools by full path, started from the Windows folder: never from the folder BenchForge runs in
+        // (a USB stick or a downloads folder can refuse to be a working directory).
+        var sys = Environment.SystemDirectory;
+        var exe = Path.IsPathRooted(file) ? file : File.Exists(Path.Combine(sys, file)) ? Path.Combine(sys, file) : file;
+        var psi = new ProcessStartInfo(exe, args)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = enc, StandardErrorEncoding = enc,
+            StandardOutputEncoding = enc, StandardErrorEncoding = enc, WorkingDirectory = sys,
         };
         using var p = new Process { StartInfo = psi };
         p.OutputDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) output(e.Data.Replace("\0", "").Trim()); };
         p.ErrorDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) output(e.Data.Replace("\0", "").Trim()); };
-        p.Start();
+        try { p.Start(); }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5)
+        {
+            // Access denied: ask Windows for administrator rights and run it in its own window instead.
+            output("Windows refused to start it directly — asking for administrator rights and running it in its own window…");
+            using var elevated = Process.Start(new ProcessStartInfo(Path.Combine(sys, "cmd.exe"), $"/c \"\"{exe}\" {args} & echo. & pause\"") { UseShellExecute = true, Verb = "runas", WorkingDirectory = sys })
+                ?? throw new InvalidOperationException("Could not start " + file);
+            try { await elevated.WaitForExitAsync(ct); }
+            catch (OperationCanceledException) { try { elevated.Kill(true); } catch { } throw; }
+            output("Finished — the result was shown in that window (press a key there to close it).");
+            return elevated.ExitCode;
+        }
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         try { await p.WaitForExitAsync(ct); }
