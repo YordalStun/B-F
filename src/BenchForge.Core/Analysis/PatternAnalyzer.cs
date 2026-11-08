@@ -29,6 +29,8 @@ public sealed class FailureCase
     public bool Laptop { get; set; }
     /// <summary>Only BenchForge stopped (closed/killed) — no hardware evidence at all.</summary>
     public bool AppOnly { get; set; }
+    /// <summary>Windows ran out of memory during this run (a test could not start) — not a hardware error.</summary>
+    public bool OutOfMemory { get; set; }
 
     public static FailureCase FromRun(RunResult r)
     {
@@ -66,13 +68,15 @@ public sealed class FailureCase
             fc.Peak = r.KeyStats.ToDictionary(k => k.Key, k => k.Value.Max);
         }
         foreach (var s in fc.Signals.Where(s => s.Module != null)) fc.Modules.Add(s.Module!);
-        foreach (var m in r.AllModules.Where(m => m.ErrorCount > 0 || (m.Failed && m.FailureReason != "Cancelled")))
+        fc.OutOfMemory = r.AllModules.Any(MemoryShortage.Is) || r.Errors.Any(e => MemoryShortage.Is(e.Message));
+        foreach (var m in r.AllModules.Where(m => m.ErrorCount > 0 || (m.Failed && m.FailureReason != "Cancelled" && !MemoryShortage.Is(m))))
             fc.ErrorsByComponent[m.Component] = fc.ErrorsByComponent.GetValueOrDefault(m.Component) + Math.Max(1, m.ErrorCount);
-        if (r.Crash != null && fc.ErrorsByComponent.Count == 0 && r.Errors.Count > 0)
-            foreach (var g in r.Errors.GroupBy(e => e.Component)) fc.ErrorsByComponent[g.Key] = g.Count();
+        var realErrors = r.Errors.Where(e => !MemoryShortage.Is(e.Message)).ToList();
+        if (r.Crash != null && fc.ErrorsByComponent.Count == 0 && realErrors.Count > 0)
+            foreach (var g in realErrors.GroupBy(e => e.Component)) fc.ErrorsByComponent[g.Key] = g.Count();
         fc.AppOnly = fc.CrashKind == CrashKind.AppTerminated && fc.ErrorsByComponent.Count == 0 &&
                      !fc.Signals.Any(s => s.Kind is SignalKind.WheaFatal or SignalKind.WheaCorrected or SignalKind.GpuDriverReset or SignalKind.BugCheck);
-        if (fc.AppOnly) fc.Suspected = null;
+        if (fc.AppOnly || (fc.OutOfMemory && fc.ErrorsByComponent.Count == 0)) fc.Suspected = null;
         fc.ErrorThreads = r.Errors.Where(e => e.Component == Component.Cpu && e.Thread != null).Select(e => e.Thread!.Value).Distinct().OrderBy(x => x).ToList();
         foreach (var m in r.AllModules.Where(m => m.Info.ContainsKey("Failing bit positions")))
             fc.RamBits.AddRange(m.Info["Failing bit positions"].Split(", ").Select(b => b.Split(' ')[0] + " " + b.Split(' ')[1]));
@@ -111,6 +115,32 @@ public sealed class PatternReport
 public static class PatternAnalyzer
 {
     public static PatternReport Analyze(IReadOnlyList<FailureCase> allCases, IReadOnlyList<RunResult>? passingRuns = null)
+    {
+        var rep = AnalyzeCases(allCases, passingRuns);
+        int starved = allCases.Count(c => c.OutOfMemory);
+        if (starved == 0) return rep;
+        int n = allCases.Count;
+        rep.Findings.Insert(0, new Finding
+        {
+            Severity = Severity.Critical, Confidence = (double)starved / n,
+            Title = (starved == n ? (n == 1 ? "The run" : $"All {n} runs") : $"{starved} of {n} runs") + " ran out of memory",
+            Detail = "Windows had no memory left (RAM + page file full), so tests could not start. That is not a hardware error and says nothing about the RAM itself.",
+        });
+        if (rep.Suspected == null)
+        {
+            rep.Verdict = "Most likely cause: Windows ran out of memory (RAM + page file) — not a hardware fault. Restart the PC and test again.";
+            rep.NextSteps = new()
+            {
+                "Restart with Start › Restart (with Fast Startup on, 'Shut down' does not reset Windows)",
+                "Check Task Manager › Performance › Memory: 'Committed' should be well below its limit",
+                "Remove or update programs that use a lot of memory (old vendor utilities are common culprits)",
+                "Run the test again — only errors from a run with enough free memory say something about the hardware",
+            };
+        }
+        return rep;
+    }
+
+    private static PatternReport AnalyzeCases(IReadOnlyList<FailureCase> allCases, IReadOnlyList<RunResult>? passingRuns)
     {
         var rep = new PatternReport { CaseCount = allCases.Count };
         // Runs where only BenchForge was closed carry no hardware evidence: report them but don't let them vote.

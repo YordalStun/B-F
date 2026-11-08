@@ -15,6 +15,7 @@ public static class RunAnalyzer
         if (laptop) LaptopClocks(r, f); else Throttling(r, f);
         PowerAndBattery(r, f);
         Errors(r, f);
+        Memory(r, f);
         Performance(r, f);
         Power(r, f);
         StabilityTests(r, f);
@@ -213,13 +214,52 @@ public static class RunAnalyzer
         }
     }
 
+    /// <summary>Windows out of memory (before or during the run), and a PC that hasn't been restarted for a long time.</summary>
+    private static void Memory(RunResult r, List<Finding> f)
+    {
+        var starved = r.AllModules.Where(MemoryShortage.Is).ToList();
+        bool starvedErrors = r.Errors.Any(e => MemoryShortage.Is(e.Message));
+        var snap = r.MemoryAtStart ?? r.Hardware?.Memory;
+        var low = MemoryShortage.Problem(snap);
+        if (starved.Count > 0 || starvedErrors)
+        {
+            var tests = string.Join(", ", starved.Select(m => $"{m.Component.Display()} {(m.Kind == StepKind.Benchmark ? "benchmark" : "stress")}").Distinct());
+            f.Add(new Finding
+            {
+                Severity = Severity.Critical, Title = "Windows ran out of memory during the test",
+                Detail = $"{(tests.Length > 0 ? tests + " could not run" : "A test could not start")} because Windows had no memory left to give (RAM + page file full). " +
+                         "This is not a hardware error — results from this run don't say anything about the RAM. " + (low != null ? "At the start: " + low + " " : "") +
+                         "Usually a program or driver is holding a lot of memory, or the PC hasn't been restarted in a long time. " + MemoryShortage.Advice(snap),
+            });
+        }
+        else if (low != null)
+            f.Add(new Finding
+            {
+                Severity = Severity.Warning, Title = "Windows is almost out of memory",
+                Detail = low + " Tests may fail to start and results can be lower than normal. " + MemoryShortage.Advice(snap),
+            });
+
+        if (r.Hardware?.LastBoot is DateTime boot && (DateTime.Now - boot).TotalDays >= 14)
+        {
+            int days = (int)(DateTime.Now - boot).TotalDays;
+            f.Add(new Finding
+            {
+                Severity = days >= 60 || starved.Count > 0 || low != null ? Severity.Warning : Severity.Info,
+                Title = $"PC has not restarted in {days} days",
+                Detail = "Programs and drivers that slowly leak memory build up over time." +
+                         (r.Hardware.FastStartupEnabled == true ? " Fast Startup is on, so 'Shut down' does not reset Windows — only Start › Restart does." : "") +
+                         " Restart before testing so results reflect the hardware.",
+            });
+        }
+    }
+
     private static void Errors(RunResult r, List<Finding> f)
     {
-        foreach (var g in r.AllModules.Where(m => m.ErrorCount > 0 || m.Failed).GroupBy(m => m.Component))
+        foreach (var g in r.AllModules.Where(m => m.ErrorCount > 0 || (m.Failed && !MemoryShortage.Is(m))).GroupBy(m => m.Component))
         {
             int errors = g.Sum(m => m.ErrorCount);
             var info = string.Join(" ", g.SelectMany(m => m.Info).Where(kv => kv.Key.StartsWith("Errors") || kv.Key.StartsWith("Failing") || kv.Key == "Data integrity").Select(kv => $"{kv.Key}: {kv.Value}."));
-            var failed = g.FirstOrDefault(m => m.Failed && m.FailureReason != "Cancelled");
+            var failed = g.FirstOrDefault(m => m.Failed && m.FailureReason != "Cancelled" && !MemoryShortage.Is(m));
             switch (g.Key)
             {
                 case Component.Cpu when errors > 0:

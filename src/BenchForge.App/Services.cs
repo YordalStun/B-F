@@ -23,6 +23,7 @@ public sealed class Services : IDisposable
 
     public void Start()
     {
+        Core.Analysis.MemoryShortage.Probe = Platform.MemoryReader.Read;
         Task.Run(() =>
         {
             try

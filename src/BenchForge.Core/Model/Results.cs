@@ -133,6 +133,8 @@ public sealed class RunResult
     public CrashInfo? Crash { get; set; }
     /// <summary>Background pings to the router / internet during the run.</summary>
     public List<NetworkTargetStats> Network { get; set; } = new();
+    /// <summary>Memory state when the run started (null for older results).</summary>
+    public MemorySnapshot? MemoryAtStart { get; set; }
     public List<EventEntry> RelatedEvents { get; set; } = new();
     public List<Finding> Findings { get; set; } = new();
     public List<Recommendation> Recommendations { get; set; } = new();

@@ -48,7 +48,9 @@ public static class CrashAnalyzer
             ActiveComponents = hb?.Components ?? new(),
             RunElapsedSeconds = hb?.RunElapsedSeconds ?? (rec.LastAlive - h.StartTime).TotalSeconds,
             StepElapsedSeconds = hb?.StepElapsedSeconds ?? 0,
-            ErrorsBeforeCrash = hb?.ErrorCount ?? 0,
+            // Older versions counted "out of memory" as an error: leave those out, they are not wrong results.
+            ErrorsBeforeCrash = Math.Max(0, (hb?.ErrorCount ?? 0) - (hb?.RecentErrors.Count(e => Analysis.MemoryShortage.Is(e.Message)) ?? 0)),
+            OutOfMemory = hb?.RecentErrors.Any(e => Analysis.MemoryShortage.Is(e.Message)) == true,
             Tail = hb?.Tail ?? new(),
         };
         if (hb?.Tail.Count > 0)
@@ -226,10 +228,12 @@ public static class CrashAnalyzer
         var disk = c.Signals.Where(s => s.Kind == SignalKind.DiskError).ToList();
         if (disk.Count > 0) { ex.Add($"{disk.Count} drive/file-system errors were logged around the crash ({disk[0].Title})."); Vote(Component.Storage, 1.5); }
         if (c.Signals.Any(s => s.Kind == SignalKind.ThermalThrottle)) ex.Add("Windows logged CPU throttling by firmware (heat or power limit).");
+        if (c.OutOfMemory)
+            ex.Add("Windows had run out of memory (RAM + page file full) just before — a test could not even start. BenchForge was most likely closed by that, not by a hardware fault. Restart the PC and test again.");
         if (c.ErrorsBeforeCrash > 0) ex.Add($"BenchForge had already found {c.ErrorsBeforeCrash} calculation/memory errors before the crash — the hardware was producing wrong results.");
 
         // When only BenchForge stopped (no reboot, no hardware signals) the load at the time says nothing about the hardware.
-        if (c.Kind == CrashKind.AppTerminated && !c.Signals.Any(s => s.Kind is SignalKind.WheaFatal or SignalKind.GpuDriverReset) && c.ErrorsBeforeCrash == 0)
+        if (c.Kind == CrashKind.AppTerminated && !c.Signals.Any(s => s.Kind is SignalKind.WheaFatal or SignalKind.GpuDriverReset) && (c.ErrorsBeforeCrash == 0 || c.OutOfMemory))
             votes.Clear();
         if (votes.Count > 0)
         {

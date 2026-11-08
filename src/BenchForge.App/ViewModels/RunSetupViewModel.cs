@@ -310,6 +310,11 @@ public sealed partial class RunSetupViewModel : PageViewModel
             System.Windows.MessageBox.Show($"This PC is running on battery ({pct}%).\n\nOn battery, laptops limit power, so scores and stress tests will be lower and a long test may drain the battery.\n\nPlug in the charger for accurate results. Start anyway?",
                 "Charger not connected", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
             return;
+        var mem = Core.Analysis.MemoryShortage.TryProbe();
+        if (Core.Analysis.MemoryShortage.Problem(mem) is string low &&
+            System.Windows.MessageBox.Show($"Windows is almost out of memory: {low}\n\nTests may fail to start, and the results would say nothing about your hardware.\n\n{Core.Analysis.MemoryShortage.Advice(mem)}\n\nStart anyway?",
+                "Not enough free memory", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
+            return;
         // Remember choices.
         var st = Main.S.Settings;
         st.Test = plan.Settings;

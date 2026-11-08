@@ -29,6 +29,16 @@ public static class RecommendationEngine
                 "If you don't: load BIOS defaults and update the BIOS — boost and voltage fixes often ship as BIOS updates",
                 "Repeat the core cycler until every core passes a few rounds",
                 "If one core fails even at stock settings, the CPU may be faulty — consider a warranty claim");
+        if (Has(x => x.Title is "Windows ran out of memory during the test" or "Windows is almost out of memory" || (x.Title.StartsWith("PC has not restarted in ") && x.Severity >= Severity.Warning)))
+        {
+            Add(Severity.Critical, null, "Free up memory, then test again", "Windows was (almost) out of memory, so tests could not run properly. This is not a hardware fault.",
+                "Restart the PC with Start › Restart (with Fast Startup on, 'Shut down' does not reset Windows)",
+                "Task Manager › Performance › Memory: 'Committed' should be well below its limit after the restart",
+                "Task Manager › Details › sort by 'Memory': remove or update programs that use a lot (old vendor utilities such as Wi-Fi tools are common culprits)",
+                "Let Windows manage the page file size: System › About › Advanced system settings › Performance › Advanced › Virtual memory",
+                "Then run the test again");
+            if (r.Hardware?.FastStartupEnabled == true) Fix("Free up memory, then test again", FixId.DisableFastStartup);
+        }
         if (Has(x => x.Title.Contains(" Hz but supports ")))
             Add(Severity.Warning, null, "Set your monitor to its full refresh rate", "A high-refresh monitor is running at a lower rate than it supports.",
                 "Windows Settings › System › Display › Advanced display › Choose a refresh rate — pick the highest",

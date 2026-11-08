@@ -35,7 +35,21 @@ public sealed class HardwareInventory
     public List<DisplayInfo> Displays { get; set; } = new();
     public List<NetAdapterInfo> NetworkAdapters { get; set; } = new();
     public List<UsbDeviceInfo> UsbDevices { get; set; } = new();
+    /// <summary>Free / committed memory when the inventory was read.</summary>
+    public MemorySnapshot? Memory { get; set; }
     public List<string> Notes { get; set; } = new();
+}
+
+public sealed class MemorySnapshot
+{
+    public DateTime Time { get; set; } = DateTime.Now;
+    public double TotalGB { get; set; }
+    public double AvailableGB { get; set; }
+    /// <summary>Most memory Windows can hand out: RAM + page file.</summary>
+    public double CommitLimitGB { get; set; }
+    public double CommittedGB { get; set; }
+    /// <summary>"name 1.2 GB" for the processes using the most memory.</summary>
+    public List<string> TopProcesses { get; set; } = new();
 }
 
 public sealed class CpuInfo

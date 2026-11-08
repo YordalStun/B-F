@@ -22,6 +22,7 @@ public static class KeyMetrics
     public const string GpuFan = "gpu.fan";
     public const string RamLoad = "ram.load";
     public const string RamUsed = "ram.used";
+    public const string RamCommitted = "ram.committed";
     public const string DiskTemp = "disk.temp";
     public const string DiskActivity = "disk.activity";
     public const string BoardTemp = "board.temp";
@@ -50,6 +51,7 @@ public static class KeyMetrics
         (GpuFan, "GPU fan", "RPM"),
         (RamLoad, "RAM usage", "%"),
         (RamUsed, "RAM used", "GB"),
+        (RamCommitted, "Memory committed (RAM + page file)", "%"),
         (DiskTemp, "Drive temperature (max)", "°C"),
         (DiskActivity, "Drive activity (max)", "%"),
         (BoardTemp, "Motherboard temperature", "°C"),
@@ -121,9 +123,14 @@ public static class KeyMetrics
         Set(d, GpuVram, Pick(gpu, SensorKind.Data, "GPU Memory Used", "D3D Dedicated Memory Used", "Memory Used"));
         Set(d, GpuFan, Pick(gpu, SensorKind.Fan, "GPU Fan", "GPU Fan 1", "Fan"));
 
-        var mem = readings.Where(r => r.HwType == HwType.Memory).ToList();
+        // LibreHardwareMonitor reports physical RAM and "Virtual Memory" (RAM + page file) as two memory devices
+        // with the same sensor names: keep them apart, or "RAM used" can read 32 GB on an 8 GB PC.
+        var allMem = readings.Where(r => r.HwType == HwType.Memory).ToList();
+        static bool IsVirtual(SensorReading r) => r.Hardware.Contains("Virtual", StringComparison.OrdinalIgnoreCase) || r.Name.Contains("Virtual", StringComparison.OrdinalIgnoreCase);
+        var mem = allMem.Where(r => !IsVirtual(r)).ToList();
         Set(d, RamLoad, Pick(mem, SensorKind.Load, "Memory", "Physical Memory", "Load"));
         Set(d, RamUsed, Pick(mem, SensorKind.Data, "Memory Used", "Used Memory", "Used"));
+        Set(d, RamCommitted, Pick(allMem.Where(IsVirtual).ToList(), SensorKind.Load, "Virtual Memory", "Memory", "Load"));
 
         var disks = readings.Where(r => r.HwType == HwType.Storage).ToList();
         Set(d, DiskTemp, disks.Where(r => r.Kind == SensorKind.Temperature).Select(r => (double?)r.Value).Max());

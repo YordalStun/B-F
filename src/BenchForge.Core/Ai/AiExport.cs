@@ -19,7 +19,7 @@ public static class AiExport
     {
         KeyMetrics.CpuTemp, KeyMetrics.CpuLoad, KeyMetrics.CpuClock, KeyMetrics.CpuPower, KeyMetrics.CpuVcore,
         KeyMetrics.GpuTemp, KeyMetrics.GpuHotspot, KeyMetrics.GpuLoad, KeyMetrics.GpuClock, KeyMetrics.GpuPower,
-        KeyMetrics.RamLoad, KeyMetrics.DiskTemp, KeyMetrics.Rail12V,
+        KeyMetrics.RamLoad, KeyMetrics.RamCommitted, KeyMetrics.DiskTemp, KeyMetrics.Rail12V,
     };
 
     public static string FileName(DateTime now) => $"BenchForge-for-AI-{Environment.MachineName}-{now:yyyy-MM-dd-HHmm}.md";
@@ -173,6 +173,9 @@ public static class AiExport
         sb.AppendLine($"- **Windows:** {hw.OsName} {hw.OsVersion}, last boot {hw.LastBoot:yyyy-MM-dd HH:mm}, power plan \"{hw.PowerPlan}\"");
         if (hw.IsLaptop || hw.HasBattery)
             sb.AppendLine($"- **Laptop:** {(hw.IsLaptop ? "yes" : "no")} ({hw.ChassisType}); battery {(hw.HasBattery ? $"{(hw.BatteryWearPercent is double w ? $"health {100 - w:0}% ({hw.BatteryFullChargeWh:0.#} of {hw.BatteryDesignCapacityWh:0.#} Wh)" : "present")}" : "none")}; charger {(hw.OnBattery switch { true => "NOT connected", false => "connected", _ => "unknown" })}");
+        if (hw.Memory is MemorySnapshot mem)
+            sb.AppendLine($"- **Memory in use:** {mem.TotalGB - mem.AvailableGB:0.0} of {mem.TotalGB:0.0} GB RAM; committed {mem.CommittedGB:0.0} of {mem.CommitLimitGB:0.0} GB (RAM + page file)" +
+                          (mem.TopProcesses.Count > 0 ? "; biggest: " + string.Join(", ", mem.TopProcesses) : ""));
         sb.AppendLine($"- **Settings:** crash dumps {DumpText(hw.CrashDumpSetting)}, Fast Startup {(hw.FastStartupEnabled is bool f ? (f ? "on" : "off") : "unknown")}, GPU TDR delay {(hw.TdrDelaySeconds is int t ? t + " s" : "default (2 s)")}");
         foreach (var n in hw.Notes) sb.AppendLine($"- Note: {n}");
         return sb.AppendLine().ToString();

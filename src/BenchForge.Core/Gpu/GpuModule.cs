@@ -95,7 +95,7 @@ public sealed class GpuModule : ITestModule
         }
 
         long vramErrors = runs.Sum(r => r.VramErrors), vramChecked = runs.Sum(r => r.VramChecked);
-        result.ErrorCount = (int)vramErrors + runs.Count(r => !r.Unavailable && r.FailureReason != null);
+        result.ErrorCount = (int)vramErrors + runs.Count(r => !r.Unavailable && r.FailureReason != null && !Analysis.MemoryShortage.Is(r.FailureReason));
         if (vramChecked > 0) result.Info["VRAM verified"] = $"{vramChecked / 1e9:0.0} GB, {vramErrors} errors";
 
         // Scores: per API, then the module score is the best API's (games use whichever runs best).
@@ -272,6 +272,12 @@ public sealed class GpuModule : ITestModule
             }
         }
         lock (stderr) if (stderr.Count > 0 && run.FailureReason != null) run.FailureReason += " | " + string.Join(" | ", stderr.Take(3));
+        // "The paging file is too small" etc.: the worker could not even load — Windows was out of memory, not the GPU at fault.
+        if (Analysis.MemoryShortage.Is(run.FailureReason))
+        {
+            run.Unavailable = false;
+            run.FailureReason = Analysis.MemoryShortage.Describe(run.FailureReason!);
+        }
         return run;
     }
 }

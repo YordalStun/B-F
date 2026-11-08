@@ -1322,3 +1322,84 @@ public class GpuApiTests
         Assert.Equal(25.2, Scoring.ScoreReferences.PcieGBs(4, 16), 1);
     }
 }
+
+public class OutOfMemoryTests
+{
+    // The DESKTOP-2AMCEF1 export: Windows was out of memory, the RAM tests could not even start, the 3D worker
+    // failed to load ("paging file is too small") and BenchForge then closed. None of that is a hardware error.
+    private static RunResult Starved()
+    {
+        var r = new RunResult { Status = RunStatus.Crashed, StartTime = DateTime.Now.AddMinutes(-14) };
+        r.Steps.Add(new StepResult
+        {
+            Name = "RAM benchmark", Kind = StepKind.Benchmark, Components = { Component.Memory }, Start = r.StartTime.AddMinutes(2), Status = "Errors",
+            Modules = { new ModuleResult { Component = Component.Memory, Kind = StepKind.Benchmark, Failed = true, FailureReason = "Insufficient memory to continue the execution of the program." } },
+        });
+        r.Errors.Add(new TestError
+        {
+            Component = Component.Gpu, Test = "3D test (OpenGL 4.3)", Time = r.StartTime.AddMinutes(13),
+            Message = "The 3D test process (OpenGL 4.3) ended unexpectedly (exit code -2147450743) during 'startup'. | Error message: The paging file is too small for this operation to complete. (0x800705AF)",
+        });
+        r.Crash = new CrashInfo { Kind = CrashKind.AppTerminated, StepName = "Everything at once", ActiveComponents = { Component.Cpu, Component.Gpu, Component.Memory }, ErrorsBeforeCrash = 0, OutOfMemory = true, SuspectedComponent = Component.Cpu };
+        return r;
+    }
+
+    [Theory]
+    [InlineData("Insufficient memory to continue the execution of the program.", true)]
+    [InlineData("Exception of type 'System.OutOfMemoryException' was thrown.", true)]
+    [InlineData("The paging file is too small for this operation to complete. (0x800705AF)", true)]
+    [InlineData("CPU core 3 returned a wrong checksum", false)]
+    [InlineData(null, false)]
+    public void Recognises_out_of_memory_messages(string? text, bool expected) => Assert.Equal(expected, MemoryShortage.Is(text));
+
+    [Fact]
+    public void Out_of_memory_is_not_blamed_on_the_RAM()
+    {
+        var rep = PatternAnalyzer.Analyze(new[] { FailureCase.FromRun(Starved()) });
+        Assert.DoesNotContain(rep.Findings, f => f.Title.Contains("RAM errors"));
+        Assert.Contains(rep.Findings, f => f.Title.Contains("ran out of memory"));
+        Assert.Null(rep.Suspected);
+        Assert.Contains("ran out of memory", rep.Verdict);
+    }
+
+    [Fact]
+    public void Run_findings_say_out_of_memory_not_ram_errors()
+    {
+        var r = Starved();
+        r.Crash = null; r.Status = RunStatus.CompletedWithErrors;
+        RunAnalyzer.Analyze(r);
+        Assert.Contains(r.Findings, f => f.Title == "Windows ran out of memory during the test");
+        Assert.DoesNotContain(r.Findings, f => f.Title.StartsWith("RAM errors") || f.Title == "RAM test did not complete");
+        Assert.Contains(r.Recommendations, x => x.Title == "Free up memory, then test again");
+    }
+
+    [Fact]
+    public void Low_memory_is_reported_before_a_test()
+    {
+        var hw = new HardwareInventory
+        {
+            LastBoot = DateTime.Now.AddDays(-385), FastStartupEnabled = true,
+            Memory = new MemorySnapshot { TotalGB = 7.9, AvailableGB = 0.05, CommitLimitGB = 32, CommittedGB = 31.9, TopProcesses = { "chrome ×20 3.1 GB" } },
+        };
+        var checks = RecommendationEngine.SystemChecks(hw);
+        var rec = Assert.Single(checks, c => c.Title == "Free up memory, then test again");
+        Assert.Contains(FixId.DisableFastStartup, rec.Fixes);
+        Assert.Null(MemoryShortage.Problem(new MemorySnapshot { TotalGB = 16, AvailableGB = 9, CommitLimitGB = 20, CommittedGB = 8 }));
+    }
+
+    [Fact]
+    public void Virtual_memory_is_not_reported_as_ram()
+    {
+        var readings = new List<SensorReading>
+        {
+            new("/vram/load", "Virtual Memory", HwType.Memory, SensorKind.Load, "Memory", 99.9, "%"),
+            new("/vram/used", "Virtual Memory", HwType.Memory, SensorKind.Data, "Memory Used", 31.9, "GB"),
+            new("/ram/load", "Total Memory", HwType.Memory, SensorKind.Load, "Memory", 62, "%"),
+            new("/ram/used", "Total Memory", HwType.Memory, SensorKind.Data, "Memory Used", 4.9, "GB"),
+        };
+        var d = KeyMetrics.From(readings);
+        Assert.Equal(4.9, d[KeyMetrics.RamUsed]);
+        Assert.Equal(62, d[KeyMetrics.RamLoad]);
+        Assert.Equal(99.9, d[KeyMetrics.RamCommitted]);
+    }
+}

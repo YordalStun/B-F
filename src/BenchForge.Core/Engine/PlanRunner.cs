@@ -81,6 +81,10 @@ public sealed class PlanRunner
         DateTime stepStart = start;
         TestStep? current = null;
         int overTemp = 0, overGpuTemp = 0, overHard = 0;
+        result.MemoryAtStart = Analysis.MemoryShortage.TryProbe();
+        if (Analysis.MemoryShortage.Problem(result.MemoryAtStart) is string low)
+            AddLog($"Warning: Windows is almost out of memory — {low} Tests may fail to start. {Analysis.MemoryShortage.Advice(result.MemoryAtStart)}", Severity.Warning, journal);
+
         double? lastAc = null;
         // Laptops are built to sit at their thermal limit: require the limit to be held longer before stopping.
         int hold = _plan.Settings.LaptopRules ? 10 : 3;
@@ -213,6 +217,13 @@ public sealed class PlanRunner
                     {
                         try { return await module.RunAsync(ctx); }
                         catch (OperationCanceledException) { return new ModuleResult { Component = c, Kind = step.Kind, Failed = true, FailureReason = "Cancelled" }; }
+                        catch (Exception ex) when (Analysis.MemoryShortage.Is(ex))
+                        {
+                            // Not a hardware error: Windows had no memory left to give the test.
+                            var why = Analysis.MemoryShortage.Describe(ex.Message);
+                            AddLog($"{c.Display()} test could not run: {why}", Severity.Warning, journal);
+                            return new ModuleResult { Component = c, Kind = step.Kind, Failed = true, FailureReason = why };
+                        }
                         catch (Exception ex)
                         {
                             AddLog($"{c.Display()} test failed: {ex.Message}", Severity.Critical, journal);
@@ -224,7 +235,10 @@ public sealed class PlanRunner
                 var modules = await Task.WhenAll(tasks);
                 sr.Modules = modules.ToList();
                 sr.End = DateTime.Now;
-                sr.Status = _runCts.IsCancellationRequested ? "Stopped" : modules.Any(m => m.Failed || m.ErrorCount > 0) ? "Errors" : "Passed";
+                sr.Status = _runCts.IsCancellationRequested ? "Stopped"
+                    : modules.Any(m => m.ErrorCount > 0 || (m.Failed && !Analysis.MemoryShortage.Is(m))) ? "Errors"
+                    : modules.Any(Analysis.MemoryShortage.Is) ? "Not enough memory"
+                    : "Passed";
                 doneSeconds += step.DurationSeconds;
                 AddLog($"Step {i + 1}/{steps.Count}: {step.Name} finished — {sr.Status}", sr.Status == "Passed" ? Severity.Info : Severity.Warning, journal);
                 journal?.SaveCompletedSteps(result.Steps);
@@ -278,6 +292,12 @@ public sealed class PlanRunner
 
     private void OnError(TestError e)
     {
+        // "Out of memory" stops a test from running; it is not a wrong result, so it is not counted as an error.
+        if (Analysis.MemoryShortage.Is(e.Message))
+        {
+            lock (_errors) { if (_errors.Count < 5000) _errors.Add(e); }
+            return;
+        }
         Interlocked.Increment(ref _errorCount);
         lock (_errors) { if (_errors.Count < 5000) _errors.Add(e); }
         ErrorReported?.Invoke(e);

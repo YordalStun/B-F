@@ -107,6 +107,8 @@ public sealed class CrashInfo
     /// <summary>Key metric history for the final minutes (seconds-before-crash → metrics).</summary>
     public List<HeartbeatSample> Tail { get; set; } = new();
     public int ErrorsBeforeCrash { get; set; }
+    /// <summary>Windows was out of memory just before (a test could not start, or RAM was full).</summary>
+    public bool OutOfMemory { get; set; }
     public List<CrashSignal> Signals { get; set; } = new();
     public List<MinidumpInfo> Dumps { get; set; } = new();
     public string Summary { get; set; } = "";

@@ -131,6 +131,7 @@ public static class WmiInventory
         });
         Try(inv, "Drive health", () => DriveHealthReader.Fill(inv));
         Try(inv, "Monitors / network / USB", () => PeripheralReader.Fill(inv));
+        Try(inv, "Memory in use", () => inv.Memory = MemoryReader.Read());
         Try(inv, "Laptop / battery", () =>
         {
             int[] portable = { 8, 9, 10, 11, 12, 14, 18, 21, 30, 31, 32 };
